@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Athena{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body{% if request.endpoint == 'index' %} data-autorefresh="60"{% endif %}>
+{% if critical_count %}
+<div class="banner-critical">
+  <strong>{{ critical_count }} unacknowledged critical error{{ 's' if critical_count != 1 }}.</strong>
+  {% if latest_critical %}Latest: [{{ latest_critical.script_name }}] {{ latest_critical.operation }}: {{ (latest_critical.raw_message or '')[:160] }}{% endif %}
+  <a href="{{ url_for('errors', severity='critical') }}">Open error log</a>
+</div>
+{% endif %}
+<header>
+  <nav>
+    <a class="brand" href="{{ url_for('index') }}">Athena</a>
+    <a href="{{ url_for('courses') }}">Courses</a>
+    <a href="{{ url_for('professors') }}">Professors</a>
+    <a href="{{ url_for('schedule') }}">Schedule</a>
+    <a href="{{ url_for('hot_zones') }}">Hot zones</a>
+    <a href="{{ url_for('syllabus') }}">Syllabus</a>
+    <a href="{{ url_for('presets') }}">Presets</a>
+    <a href="{{ url_for('errors') }}">Errors{% if critical_count %} <span class="pill red">{{ critical_count }}</span>{% endif %}</a>
+  </nav>
+  <div class="poller-strip">
+    {% for p in poller_status %}
+    <span class="poller state-{{ p.state }}"><b>{{ p.api_name }}</b> {{ p.state }}{% if p.last_cycle_at %} · {{ p.last_cycle_at|dt }}{% endif %}</span>
+    {% endfor %}
+    {% if banner_error %}<span class="poller state-auth_failed">db: {{ banner_error }}</span>{% endif %}
+  </div>
+</header>
+<main>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}<div class="flash flash-{{ cat }}">{{ msg }}</div>{% endfor %}
+{% endwith %}
+{% block content %}{% endblock %}
+</main>
+<script>
+document.addEventListener('submit', function (e) {
+  var f = e.target; var q = f.getAttribute('data-confirm');
+  if (q && !window.confirm(q)) e.preventDefault();
+});
+(function () {
+  var s = document.body.getAttribute('data-autorefresh');
+  if (s) setTimeout(function () { if (!document.activeElement || document.activeElement.tagName !== 'INPUT') location.reload(); }, parseInt(s, 10) * 1000);
+})();
+</script>
+</body>
+</html>

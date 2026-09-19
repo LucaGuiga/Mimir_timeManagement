@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% block title %}Athena · Schedule{% endblock %}
+{% block content %}
+<h1>Schedule</h1>
+<form method="get" class="inline card">
+  <a class="button" href="{{ url_for('schedule', date=prev.isoformat()) }}">←</a>
+  <input type="date" name="date" value="{{ d.isoformat() }}"><button>Go</button>
+  <a class="button" href="{{ url_for('schedule', date=next.isoformat()) }}">→</a>
+  <a class="button" href="{{ url_for('schedule') }}">Today</a>
+</form>
+<h2>{{ d.strftime('%A %b %d, %Y') }}</h2>
+<table>
+  <tr><th>Start</th><th>End</th><th>Label</th><th>Category</th><th>Pri</th><th>Moveable</th><th>Status</th><th></th></tr>
+  {% for b in blocks %}
+  <tr class="{{ 'skipped' if b.skipped }}">
+    <td>{{ b.start_time|hhmm }}</td><td>{{ b.end_time|hhmm }}</td><td>{{ b.label }}</td><td>{{ b.time_category }}</td><td>{{ b.priority }}</td><td>{{ 'yes' if b.moveable else 'no' }}</td>
+    <td>{% if b.skipped %}skipped ({{ b.skip_reason }}){% elif b.original_start_time %}shifted from {{ b.original_start_time|hhmm }}{% else %}–{% endif %}</td>
+    <td class="actions">
+      {% if b.skipped %}<form method="post" action="{{ url_for('schedule_unskip', block_id=b.id) }}"><input type="hidden" name="date" value="{{ d.isoformat() }}"><button class="small">Unskip</button></form>
+      {% else %}<form method="post" action="{{ url_for('schedule_skip', block_id=b.id) }}"><input type="hidden" name="date" value="{{ d.isoformat() }}"><input name="reason" placeholder="reason" size="10"><button class="small">Skip</button></form>{% endif %}
+      <form method="post" action="{{ url_for('schedule_delete', block_id=b.id) }}" data-confirm="Delete this block?"><input type="hidden" name="date" value="{{ d.isoformat() }}"><button class="small danger">Delete</button></form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="8" class="muted">No blocks on this day.</td></tr>{% endfor %}
+</table>
+<h2>Add block</h2>
+<form method="post" action="{{ url_for('schedule_add') }}" class="inline card">
+  <input type="hidden" name="date" value="{{ d.isoformat() }}">
+  <label>Label <input name="label" required></label>
+  <label>Category <select name="time_category">{% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
+  <label>Start <input type="time" name="start_time" required></label>
+  <label>End <input type="time" name="end_time" required></label>
+  <label>Priority <input type="number" name="priority" min="1" max="5" value="3"></label>
+  <label><input type="checkbox" name="moveable"> moveable</label>
+  <button>Add</button>
+</form>
+{% endblock %}

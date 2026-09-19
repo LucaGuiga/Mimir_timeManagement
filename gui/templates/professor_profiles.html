@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Athena · Professors{% endblock %}
+{% block content %}
+<h1>Professor profiles</h1>
+{% if not profs %}<p class="muted">No professors yet.</p>{% endif %}
+<section class="grid">
+{% for p in profs %}
+<div class="card">
+  <h2>{{ p.professor_name }}</h2>
+  <p class="muted">{% for c in p.courses %}{{ c.canvas_course_name }}{{ ', ' if not loop.last }}{% else %}no courses{% endfor %}</p>
+  <table class="kv">
+    <tr><th>Syllabus adherence</th><td>{{ '%.0f%%'|format(p.syllabus_adherence_score * 100) if p.syllabus_adherence_score is not none else '–' }}</td></tr>
+    <tr><th>Avg early post</th><td>{{ '%.1f days'|format(p.avg_early_post_days) if p.avg_early_post_days is not none else '–' }}</td></tr>
+    <tr><th>Avg late post</th><td>{{ '%.1f days'|format(p.avg_late_post_days) if p.avg_late_post_days is not none else '–' }}</td></tr>
+    <tr><th>Typical days</th><td>{{ p.day_names|join(', ') or '–' }}</td></tr>
+    <tr><th>Typical hours</th><td>{% if p.typical_post_hour_start is not none %}{{ '%02d:00'|format(p.typical_post_hour_start) }} to {{ '%02d:00'|format(p.typical_post_hour_end) }}{% else %}–{% endif %}</td></tr>
+    <tr><th>Observations</th><td>{{ p.observation_count }}</td></tr>
+    <tr><th>Last updated</th><td>{{ p.last_updated|dt if p.last_updated else 'never' }}</td></tr>
+  </table>
+</div>
+{% endfor %}
+</section>
+{% endblock %}
