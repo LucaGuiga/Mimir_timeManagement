@@ -1,0 +1,21 @@
+# Athena API (FastAPI + uvicorn) systemd unit.
+# Install:
+#   sudo cp athena_api.service /etc/systemd/system/athena_api.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now athena_api
+# Adjust User, Group, WorkingDirectory, and the venv path below to match the box.
+[Unit]
+Description=Athena snapshot API and dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=athena
+Group=athena
+WorkingDirectory=/opt/athena/api
+ExecStart=/opt/athena/venv/bin/uvicorn fastapi_app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
