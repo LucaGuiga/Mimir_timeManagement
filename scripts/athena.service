@@ -1,0 +1,26 @@
+# Athena local supervisor systemd unit.
+# Install:
+#   sudo cp scripts/athena.service /etc/systemd/system/athena.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now athena
+# Set User and WorkingDirectory to the operating user and the repo checkout.
+# If the database unit is called mariadb.service on this box, change both mysql.service references.
+[Unit]
+Description=Athena academic supervisor (main, poller, GUI)
+After=network-online.target mysql.service
+Wants=network-online.target
+Requires=mysql.service
+
+[Service]
+Type=forking
+User=athena
+WorkingDirectory=/home/athena/athena
+ExecStart=/home/athena/athena/scripts/startup.sh
+ExecStop=/home/athena/athena/scripts/shutdown.sh
+PIDFile=/home/athena/athena/run/main.pid
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

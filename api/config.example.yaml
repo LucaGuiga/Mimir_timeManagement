@@ -1,0 +1,11 @@
+# Copy this file to api/config.yaml and fill in api_token. config.yaml is gitignored.
+# Shared secret; must equal aws.api_token in the local config/config.yaml
+api_token: ""
+# Interface uvicorn binds to
+host: "0.0.0.0"
+# Port uvicorn listens on
+port: 8000
+# SQLite file holding the latest snapshot per key
+sqlite_path: "snapshots.sqlite"
+# Browser origins allowed to call the API (the dashboard is served from this same process, so usually empty)
+allowed_origins: []
