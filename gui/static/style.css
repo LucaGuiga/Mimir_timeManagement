@@ -1,0 +1,46 @@
+:root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6eb; --green:#1f9d55; --amber:#d97706; --red:#dc2626; --blue:#2563eb; }
+* { box-sizing:border-box; }
+body { margin:0; font:15px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+header { background:#fff; border-bottom:1px solid var(--line); }
+nav { display:flex; flex-wrap:wrap; gap:.25rem 1rem; padding:.6rem 1rem; align-items:center; }
+nav a { color:var(--ink); text-decoration:none; padding:.2rem 0; }
+nav a:hover { color:var(--blue); }
+nav .brand { font-weight:700; font-size:1.15rem; margin-right:.5rem; }
+.poller-strip { display:flex; flex-wrap:wrap; gap:.5rem; padding:.35rem 1rem .6rem; font-size:.8rem; }
+.poller { padding:.15rem .5rem; border-radius:999px; background:#eef0f3; }
+.state-running { background:#dcfce7; } .state-paused, .state-unknown { background:#f3f4f6; } .state-backoff { background:#fef3c7; } .state-auth_failed { background:#fee2e2; }
+.banner-critical { position:sticky; top:0; z-index:10; background:var(--red); color:#fff; padding:.6rem 1rem; }
+.banner-critical a { color:#fff; margin-left:.75rem; }
+main { max-width:1100px; margin:0 auto; padding:1rem; }
+h1 { font-size:1.5rem; margin:.25rem 0 .75rem; } h2 { font-size:1.1rem; margin:0 0 .5rem; } h3 { font-size:1rem; margin:.75rem 0 .35rem; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.9rem 1rem; margin-bottom:1rem; }
+.card.inactive { opacity:.6; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:1rem; }
+table { width:100%; border-collapse:collapse; font-size:.92rem; }
+th, td { text-align:left; padding:.35rem .4rem; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--muted); font-weight:600; }
+table.kv th { width:45%; }
+tr.skipped td { text-decoration:line-through; color:var(--muted); }
+tr.sev-critical td:first-child { border-left:3px solid var(--red); }
+td.msg { max-width:420px; word-break:break-word; font-family:ui-monospace, Menlo, monospace; font-size:.8rem; }
+td.actions { white-space:nowrap; } td.actions form { display:inline-block; margin-right:.3rem; }
+.muted { color:var(--muted); } .small { font-size:.8rem; }
+.pill { display:inline-block; padding:.05rem .5rem; border-radius:999px; font-size:.75rem; background:#eef0f3; color:var(--ink); vertical-align:middle; }
+.pill.green { background:#dcfce7; color:#166534; } .pill.amber { background:#fef3c7; color:#92400e; } .pill.red { background:#fee2e2; color:#991b1b; }
+.stress { display:flex; align-items:baseline; gap:.75rem; margin:.25rem 0 .75rem; padding:.5rem .75rem; border-radius:8px; }
+.stress .ratio { font-size:2.2rem; font-weight:700; } .stress .band { text-transform:uppercase; font-weight:600; letter-spacing:.05em; }
+.band-green { background:#dcfce7; color:#166534; } .band-amber { background:#fef3c7; color:#92400e; } .band-red { background:#fee2e2; color:#991b1b; }
+.flash { padding:.6rem .8rem; border-radius:6px; margin-bottom:.75rem; }
+.flash-ok, .flash-message { background:#dcfce7; color:#166534; } .flash-error { background:#fee2e2; color:#991b1b; }
+.flash ul { margin:.25rem 0 0 1.2rem; }
+form.inline { display:flex; flex-wrap:wrap; gap:.5rem .9rem; align-items:end; }
+form.inline label { display:flex; flex-direction:column; font-size:.8rem; color:var(--muted); gap:.15rem; }
+input, select, button, .button { font:inherit; padding:.4rem .55rem; border:1px solid #cfd4dc; border-radius:6px; background:#fff; color:var(--ink); }
+input[type=date], input[type=time], input[type=number] { min-width:7rem; }
+button, .button { background:var(--blue); color:#fff; border-color:var(--blue); cursor:pointer; text-decoration:none; display:inline-block; }
+button.small { padding:.2rem .5rem; font-size:.8rem; } button.danger { background:var(--red); border-color:var(--red); }
+.button { background:#eef0f3; color:var(--ink); border-color:var(--line); }
+.controls { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:.5rem; }
+.pager a { margin-right:1rem; }
+code { background:#eef0f3; padding:.05rem .3rem; border-radius:4px; font-size:.85rem; }
+@media (max-width: 640px) { main { padding:.6rem; } table { font-size:.85rem; } th, td { padding:.3rem .25rem; } td.msg { max-width:200px; } }

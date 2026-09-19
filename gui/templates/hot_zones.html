@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Athena · Hot zones{% endblock %}
+{% block content %}
+<h1>Hot zones</h1>
+<p class="muted">Windows when a professor tends to post. Informational only; polling frequency never changes. Profiler rows are recomputed automatically on every sweep and cannot be deleted here.</p>
+<form method="post" action="{{ url_for('hot_zones_add') }}" class="inline card">
+  <label>Professor <select name="professor_id" required>{% for p in profs %}<option value="{{ p.id }}">{{ p.professor_name }}</option>{% endfor %}</select></label>
+  <label>Day <select name="day_of_week">{% for d in days %}<option value="{{ loop.index0 }}">{{ d }}</option>{% endfor %}</select></label>
+  <label>From hour <input type="number" name="hour_start" min="0" max="23" value="9" required></label>
+  <label>To hour <input type="number" name="hour_end" min="1" max="24" value="12" required></label>
+  <button>Add manual window</button>
+</form>
+{% for p in profs %}
+<div class="card">
+  <h2>{{ p.professor_name }}</h2>
+  {% if p.zones %}<table>
+    <tr><th>Day</th><th>Window</th><th>Source</th><th></th></tr>
+    {% for z in p.zones %}<tr><td>{{ days[z.day_of_week] }}</td><td>{{ '%02d:00'|format(z.hour_start) }} to {{ '%02d:00'|format(z.hour_end) }}</td><td>{{ z.source }}</td>
+      <td>{% if z.source == 'manual' %}<form method="post" action="{{ url_for('hot_zones_delete', zone_id=z.id) }}" data-confirm="Delete this window?"><button class="small danger">Delete</button></form>{% else %}<span class="muted">recomputed by profiler</span>{% endif %}</td></tr>{% endfor %}
+  </table>{% else %}<p class="muted">No windows yet.</p>{% endif %}
+</div>
+{% else %}<p class="muted">No professors yet.</p>{% endfor %}
+{% endblock %}

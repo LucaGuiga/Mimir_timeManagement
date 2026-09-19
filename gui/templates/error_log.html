@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Athena · Errors{% endblock %}
+{% block content %}
+<h1>Error log <span class="pill red">{{ critical_count }} critical</span></h1>
+<form method="get" class="inline card">
+  <label>Severity <select name="severity"><option value="">any</option>{% for s in ('warning','critical') %}<option value="{{ s }}" {{ 'selected' if q.get('severity') == s }}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Script <input name="script_name" list="scripts" value="{{ q.get('script_name','') }}"></label>
+  <datalist id="scripts">{% for s in scripts %}<option value="{{ s }}">{% endfor %}</datalist>
+  <label>From <input type="date" name="date_from" value="{{ q.get('date_from','') }}"></label>
+  <label>To <input type="date" name="date_to" value="{{ q.get('date_to','') }}"></label>
+  <button>Filter</button>
+  <a class="button" href="{{ url_for('errors') }}">Clear</a>
+</form>
+<form method="post" action="{{ url_for('errors_ack_all') }}" data-confirm="Acknowledge every unacknowledged critical error?"><button class="danger">Acknowledge all critical</button></form>
+<p class="muted">{{ total }} unacknowledged row{{ 's' if total != 1 }}, page {{ page }} of {{ pages }}.</p>
+<table>
+  <tr><th>Time</th><th>Sev</th><th>Script</th><th>Type</th><th>Operation</th><th>Message</th><th></th></tr>
+  {% for r in rows %}
+  <tr class="sev-{{ r.severity }}"><td>{{ r.timestamp|dt }}</td><td>{{ r.severity }}</td><td>{{ r.script_name }}</td><td>{{ r.error_type }}</td><td>{{ r.operation }}</td>
+    <td class="msg">{{ r.raw_message }}</td>
+    <td><form method="post" action="{{ url_for('errors_ack', error_id=r.id) }}"><button class="small">Ack</button></form></td></tr>
+  {% else %}<tr><td colspan="7" class="muted">Nothing unacknowledged.</td></tr>{% endfor %}
+</table>
+{% if pages > 1 %}<p class="pager">
+  {% if page > 1 %}<a href="{{ url_for('errors', page=page-1, severity=q.get('severity'), script_name=q.get('script_name'), date_from=q.get('date_from'), date_to=q.get('date_to')) }}">← newer</a>{% endif %}
+  {% if page < pages %}<a href="{{ url_for('errors', page=page+1, severity=q.get('severity'), script_name=q.get('script_name'), date_from=q.get('date_from'), date_to=q.get('date_to')) }}">older →</a>{% endif %}
+</p>{% endif %}
+{% endblock %}

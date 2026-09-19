@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block title %}Athena · Syllabus{% endblock %}
+{% block content %}
+<h1>Syllabus parsing</h1>
+<p class="muted">Quarter: {{ quarter or 'not set' }} · model: {{ model }}. Parsing calls the Anthropic API on demand and charges against the per class budget.</p>
+{% for c in courses %}
+<div class="card">
+  <h2>{{ c.canvas_course_name }}</h2>
+  <table class="kv">
+    <tr><th>Parsed this quarter</th><td>{% if c.parsed %}yes, {{ c.parsed.created_at|dt }} ({{ c.parsed.parse_model }})
+        <span class="pill {{ 'green' if c.parsed.validated else 'red' }}">{{ 'validated' if c.parsed.validated else 'invalid' }}</span>
+        <span class="pill {{ 'green' if c.parsed.human_reviewed else 'amber' }}">{{ 'reviewed' if c.parsed.human_reviewed else 'not reviewed' }}</span>{% else %}no{% endif %}</td></tr>
+    <tr><th>Last parse cost</th><td>{{ '$%.4f'|format(c.parsed.parse_cost_usd) if c.parsed and c.parsed.parse_cost_usd is not none else '–' }}</td></tr>
+    <tr><th>Budget used</th><td>${{ '%.4f'|format(c.spent) }}{% if c.budget is not none %} of ${{ '%.2f'|format(c.budget) }}{% else %} (no budget set){% endif %}</td></tr>
+  </table>
+  <div class="controls">
+    <form method="post" action="{{ url_for('syllabus_find', course_id=c.id) }}"><button>Find syllabus sources</button></form>
+    {% if c.sources %}
+    <form method="post" action="{{ url_for('syllabus_parse', course_id=c.id) }}" class="inline" data-confirm="Send this syllabus to the Anthropic API?">
+      <label>Source <select name="source">
+        {% if c.sources.has_body %}<option value="body">Canvas syllabus body</option>{% endif %}
+        {% for f in c.sources.files %}<option value="{{ f.id }}">{{ f.display_name }}</option>{% endfor %}
+      </select></label>
+      {% if c.sources.has_body or c.sources.files %}<button>Parse</button>{% else %}<span class="muted">nothing found on Canvas</span>{% endif %}
+    </form>
+    {% endif %}
+  </div>
+  {% if c.validation_errors %}<div class="flash flash-error">Validation failed:<ul>{% for e in c.validation_errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+  {% if c.parsed_items %}
+  <h3>Review parsed items</h3>
+  <form method="post" action="{{ url_for('syllabus_review', parsed_id=c.parsed.id) }}">
+    <table>
+      <tr><th>Title</th><th>Type</th><th>#</th><th>Matched assignment</th><th>Predicted open</th><th>Predicted due</th><th>Notes</th></tr>
+      {% for it in c.parsed_items %}{% set i = loop.index0 %}
+      <tr><td>{{ it.title }}</td><td>{{ it.assignment_type }}</td><td>{{ it.assignment_number if it.assignment_number is not none else '' }}</td>
+        <td><select name="assignment_{{ i }}"><option value="">unmatched</option>{% for a in c.assignments %}<option value="{{ a.id }}" {{ 'selected' if a.id == it.matched_assignment_id }}>{{ a.title }}</option>{% endfor %}</select></td>
+        <td><input type="date" name="open_{{ i }}" value="{{ it.predicted_open or '' }}"></td>
+        <td><input type="date" name="due_{{ i }}" value="{{ it.predicted_due or '' }}"></td>
+        <td class="muted">{{ it.notes }}</td></tr>
+      {% endfor %}
+    </table>
+    <button>Save review and mark human reviewed</button>
+  </form>
+  {% endif %}
+</div>
+{% else %}<p class="muted">No active courses.</p>{% endfor %}
+{% endblock %}

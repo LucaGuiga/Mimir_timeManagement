@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block title %}Athena · Today{% endblock %}
+{% block content %}
+<h1>Today, {{ today.strftime('%A %b %d') }}</h1>
+<section class="grid">
+  <div class="card">
+    <h2>Stress</h2>
+    {% if s %}
+    <div class="stress band-{{ s.band }}"><span class="ratio">{{ '%.2f'|format(s.ratio) }}</span> <span class="band">{{ s.band }}</span></div>
+    <table class="kv">
+      <tr><th>T_available</th><td>{{ '%.2f'|format(s.t_available or 0) }} h</td></tr>
+      <tr><th>Deadline term</th><td>{{ '%.2f'|format(s.deadline_term or 0) }}</td></tr>
+      <tr><th>Sleep penalty</th><td>{{ '%.2f'|format(s.sleep_penalty or 0) }}</td></tr>
+      <tr><th>Hours slept</th><td>{{ '%.1f'|format(s.hours_slept or 0) }}</td></tr>
+      <tr><th>Calculated</th><td>{{ s.calculated_at|dt }}</td></tr>
+    </table>
+    {% else %}<p class="muted">No stress score for today yet.</p>{% endif %}
+    <div class="controls">
+      <form method="post" action="{{ url_for('control_recalc') }}" data-confirm="Recalculate today's stress now?"><button>Recalculate stress</button></form>
+      <form method="post" action="{{ url_for('control_rebuild') }}" data-confirm="Re evaluate today's schedule? Blocks may be skipped or shifted."><button>Rebuild schedule</button></form>
+      <form method="post" action="{{ url_for('control_restart') }}" data-confirm="Send SIGTERM to the poller? The supervisor restarts it."><button class="danger">Restart poller</button></form>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Polling (last hour)</h2>
+    <table>
+      <tr><th>API</th><th>Last poll</th><th>Avg response</th></tr>
+      {% for m in metrics %}<tr><td>{{ m.api }}</td><td>{{ m.last|dt if m.last else 'none' }}</td><td>{{ m.avg_us ~ ' µs' if m.avg_us is not none else '–' }}</td></tr>{% endfor %}
+    </table>
+  </div>
+</section>
+<section class="card">
+  <h2>Schedule <a class="small" href="{{ url_for('schedule') }}">edit</a></h2>
+  {% if blocks %}<table>
+    <tr><th>Start</th><th>End</th><th>Label</th><th>Category</th><th></th></tr>
+    {% for b in blocks %}<tr class="{{ 'skipped' if b.skipped }}"><td>{{ b.start_time|hhmm }}</td><td>{{ b.end_time|hhmm }}</td><td>{{ b.label }}</td><td>{{ b.time_category }}</td>
+      <td class="muted">{% if b.skipped %}skipped: {{ b.skip_reason }}{% elif b.original_start_time %}moved from {{ b.original_start_time|hhmm }}{% endif %}</td></tr>{% endfor %}
+  </table>{% else %}<p class="muted">No blocks today.</p>{% endif %}
+</section>
+<section class="card">
+  <h2>Due in the next 7 days</h2>
+  {% if due %}<table>
+    <tr><th>Due</th><th>Course</th><th>Title</th><th>Type</th><th>Days left</th><th>Status</th></tr>
+    {% for a in due %}<tr><td>{{ a.due_at|dt }}</td><td>{{ a.canvas_course_name }}</td><td>{{ a.title }}</td><td>{{ a.assignment_type }}</td><td>{{ a.days_remaining }}</td><td>{{ a.status }}</td></tr>{% endfor %}
+  </table>{% else %}<p class="muted">Nothing due this week.</p>{% endif %}
+</section>
+{% endblock %}

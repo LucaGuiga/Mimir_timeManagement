@@ -1,0 +1,37 @@
+{% extends "base.html" %}{% block title %}Athena · Presets{% endblock %}
+{% block content %}
+<h1>Presets</h1>
+<div class="card">
+  <h2>Difficulty per assignment type</h2>
+  <p class="muted">1 to 5. Estimated hours = e<sup>x / 1.248</sup>, shown live.</p>
+  <form method="post" action="{{ url_for('presets_save') }}">
+    <input type="hidden" name="form" value="difficulty">
+    <table>
+      <tr><th>Type</th><th>Difficulty</th><th>Estimated hours</th></tr>
+      {% for t in types %}<tr><td>{{ t }}</td><td><input type="number" name="d_{{ t }}" min="1" max="5" step="1" value="{{ difficulty.get(t, 2) }}" class="diff"></td><td class="est">–</td></tr>{% endfor %}
+    </table>
+    <button>Save difficulty presets</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Time presets</h2>
+  <form method="post" action="{{ url_for('presets_save') }}" class="inline">
+    <input type="hidden" name="form" value="time">
+    <label>Sleep target (h) <input type="number" step="0.25" min="4" max="12" name="sleep_target_hours" value="{{ tp.get('sleep_target_hours', 8) }}"></label>
+    <label>Commute (min) <input type="number" min="0" name="commute_minutes" value="{{ tp.get('commute_minutes', 0) }}"></label>
+    <label>Breakfast (min) <input type="number" min="0" name="breakfast_minutes" value="{{ tp.get('breakfast_minutes', 0) }}"></label>
+    <label>Lunch (min) <input type="number" min="0" name="lunch_minutes" value="{{ tp.get('lunch_minutes', 0) }}"></label>
+    <label>Dinner (min) <input type="number" min="0" name="dinner_minutes" value="{{ tp.get('dinner_minutes', 0) }}"></label>
+    <label>Chores (min) <input type="number" min="0" name="chores_minutes" value="{{ tp.get('chores_minutes', 0) }}"></label>
+    <label>Alpha (sleep penalty) <input type="number" step="0.1" min="0" name="alpha" value="{{ tp.get('alpha', 2.0) }}"></label>
+    <button>Save time presets</button>
+  </form>
+</div>
+<script>
+document.querySelectorAll('input.diff').forEach(function (inp) {
+  var out = inp.closest('tr').querySelector('.est');
+  var upd = function () { var x = parseFloat(inp.value); out.textContent = isNaN(x) ? '–' : Math.exp(x / 1.248).toFixed(1) + ' h'; };
+  inp.addEventListener('input', upd); upd();
+});
+</script>
+{% endblock %}

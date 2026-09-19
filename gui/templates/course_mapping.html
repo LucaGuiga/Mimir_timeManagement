@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Athena · Courses{% endblock %}
+{% block content %}
+<h1>Course mapping</h1>
+<datalist id="repos">{% for r in repos %}<option value="{{ r }}">{% endfor %}</datalist>
+{% if not courses %}<p class="muted">No courses yet. The Canvas poller fills this table on its first cycle.</p>{% endif %}
+{% for c in courses %}
+<div class="card {{ 'inactive' if not c.active }}">
+  <h2>{{ c.canvas_course_name }} <span class="pill {{ 'green' if c.mapped else 'amber' }}">{{ 'mapped' if c.mapped else 'unmapped' }}</span>{% if not c.active %} <span class="pill">inactive</span>{% endif %}</h2>
+  <p class="muted">Canvas id {{ c.canvas_course_id }}{% if c.professor_name %} · {{ c.professor_name }}{% endif %}{% if c.quarter %} · {{ c.quarter }}{% endif %}</p>
+  {% if c.mapped %}<p>Current: <code>{{ c.repo_name }}</code> / <code>{{ c.repo_path_prefix or '' }}</code> on <code>{{ c.branches_text }}</code></p>{% endif %}
+  <form method="post" action="{{ url_for('courses_map') }}" class="inline">
+    <input type="hidden" name="course_id" value="{{ c.id }}">
+    <label>Repo <input name="repo_name" list="repos" value="{{ c.repo_name or '' }}" placeholder="school-repo"></label>
+    <label>Path prefix <input name="repo_path_prefix" value="{{ c.repo_path_prefix or '' }}" placeholder="Q1/ECE1"></label>
+    <label>Branches <input name="branches" value="{{ c.branches_text }}" placeholder="main, dev"></label>
+    <button>{{ 'Remap' if c.mapped else 'Map' }}</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}
