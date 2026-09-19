@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS professor_profiles (
   typical_post_hour_start TINYINT NULL,
   typical_post_hour_end TINYINT NULL,
   observation_count INT NOT NULL DEFAULT 0,
+  -- rolling counters behind the derived columns: {"days":[7 ints],"hours":[24 ints],"early_n","late_n","adh_n"}
+  post_histogram JSON NULL,
   last_updated DATETIME NULL,
   UNIQUE KEY uq_professor_name (professor_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
