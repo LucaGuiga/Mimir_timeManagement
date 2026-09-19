@@ -1,0 +1,8 @@
+config/config.yaml
+run/
+logs/*.log
+__pycache__/
+frontend/node_modules/
+frontend/dist/
+frontend/src/config.js
+api/config.yaml

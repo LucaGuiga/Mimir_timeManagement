@@ -1,0 +1,8 @@
+apscheduler>=3.10,<4
+requests>=2.31,<3
+mysql-connector-python>=8.0,<10
+pyyaml>=6.0,<7
+ruamel.yaml>=0.18,<1
+flask>=3.0,<4
+anthropic>=0.40,<1
+pypdf>=4.0,<6

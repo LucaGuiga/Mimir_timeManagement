@@ -1,0 +1,175 @@
+# Copy this file to config/config.yaml and fill in the secrets. config.yaml is gitignored.
+# Athena configuration. This file is the only source of secrets and settings.
+# It is gitignored; copy it to a safe place before reinstalling.
+
+canvas:
+  # Canvas API access token (Account > Settings > New Access Token)
+  token: ""
+  # Canvas instance base URL
+  base_url: "https://canvas.ucsc.edu"
+  # Seconds between Canvas poll cycles
+  poll_seconds: 60
+  # Warn via Telegram when X-Rate-Limit-Remaining drops below this
+  rate_limit_warn_threshold: 100
+
+github:
+  # GitHub personal access token with repo read scope
+  pat: ""
+  # GitHub username that owns the class repos
+  username: ""
+  # Seconds between GitHub poll cycles
+  poll_seconds: 60
+  # Pause polling (backoff state) when remaining rate limit drops below this
+  rate_limit_backoff_threshold: 200
+  # Map of repo subfolder name to assignment_type; used to classify commits
+  category_folders:
+    HW: hw
+    Labs: lab
+    Tests: test
+    Quizzes: quiz
+    Projects: project_milestone
+    Readings: reading
+
+oura:
+  # Oura personal access token
+  pat: ""
+  # Four daily poll times, HH:MM, 24 hour local time
+  poll_times:
+    - "07:00"
+    - "12:00"
+    - "17:00"
+    - "22:00"
+  # How many past days to request on each poll to fill gaps
+  backfill_days: 7
+  # Index into poll_times of the poll that feeds the morning email
+  morning_poll_index: 0
+
+anthropic:
+  # Anthropic API key, used only by the GUI for on demand syllabus parsing
+  api_key: ""
+  # Model used for syllabus parsing
+  parse_model: "claude-sonnet-5"
+  # Optional per class spending cap in USD, keyed by canvas_course_name
+  per_class_claude_budget_usd: {}
+
+telegram:
+  # Telegram bot token from @BotFather
+  bot_token: ""
+  # Chat id that receives alerts (send /start to the bot, then read getUpdates)
+  chat_id: ""
+
+email:
+  # SMTP server hostname
+  smtp_host: ""
+  # SMTP port (587 for STARTTLS, 465 for SSL)
+  smtp_port: 587
+  # SMTP login user
+  smtp_user: ""
+  # SMTP login password or app password
+  smtp_password: ""
+  # Address that receives the morning and evening summaries
+  recipient: ""
+  # Local time of the morning summary, HH:MM
+  morning_time: "07:30"
+  # Local time of the evening summary, HH:MM
+  evening_time: "21:00"
+
+mysql:
+  # MySQL host
+  host: "127.0.0.1"
+  # MySQL port
+  port: 3306
+  # MySQL user
+  user: "athena"
+  # MySQL password
+  password: ""
+  # Database name
+  db: "athena"
+
+aws:
+  # Base URL of the FastAPI snapshot receiver on AWS
+  api_url: ""
+  # Bearer token shared with the FastAPI app
+  api_token: ""
+  # Seconds between snapshot pushes
+  push_seconds: 60
+  # Set false to disable pushing entirely
+  enabled: true
+
+# Human readable label for the current quarter, e.g. "Fall 2026"
+quarter_label: ""
+
+# Lowercase substrings matched against the Canvas assignment group name and
+# title to pick an assignment_type. First matching type wins, in this order.
+assignment_type_keywords:
+  test: [exam, midterm, final, test]
+  quiz: [quiz]
+  lab: [lab]
+  project_milestone: [project, milestone]
+  reading: [reading]
+  hw: [homework, hw, problem set]
+
+# Difficulty per assignment_type, 1 to 5.
+# Estimated hours = e^(x/1.248), which maps 1..5 onto roughly 2 to 55 hours.
+difficulty_presets:
+  hw: 2
+  quiz: 2
+  test: 5
+  lab: 3
+  project_milestone: 4
+  reading: 1
+  other: 2
+
+time_presets:
+  # Target hours of sleep per night
+  sleep_target_hours: 8
+  # Minutes of commute per day, both directions combined
+  commute_minutes: 30
+  # Minutes for breakfast
+  breakfast_minutes: 20
+  # Minutes for lunch
+  lunch_minutes: 30
+  # Minutes for dinner
+  dinner_minutes: 40
+  # Minutes of chores per day
+  chores_minutes: 30
+  # Sleep penalty strength in the stress formula
+  alpha: 2.0
+
+stress:
+  # Minutes between stress recalculations
+  recalc_minutes: 15
+  # Ratio below this is green
+  green_below: 0.8
+  # Ratio below this is amber; at or above is red
+  amber_below: 1.0
+  # Floor on available hours to avoid division blowups
+  min_available_hours: 0.5
+  # Floor on days remaining to a deadline
+  min_days_remaining: 0.25
+
+schedule_builder:
+  # Local time the daily schedule is built, HH:MM
+  run_time: "06:30"
+
+supervisor:
+  # Launch the poller process at startup
+  start_poller: true
+  # Launch the Flask GUI process at startup
+  start_gui: true
+  # Interface the GUI binds to
+  gui_host: "0.0.0.0"
+  # Port the GUI listens on
+  gui_port: 5000
+  # Seconds to wait before restarting a dead child
+  restart_backoff_seconds: 10
+  # Give up restarting a child after this many restarts in ten minutes
+  max_restarts_per_10min: 3
+  # Seconds to wait for children to exit after SIGTERM before SIGKILL
+  shutdown_grace_seconds: 30
+
+paths:
+  # Directory for pidfiles, relative to the repo root
+  run_dir: "run"
+  # Directory for log files, relative to the repo root
+  log_dir: "logs"
