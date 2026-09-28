@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
-from core import schedule_builder, stress, syllabus_parser
+from core import email_sender, schedule_builder, stress, syllabus_parser
 from core.config import ConfigError, get, load_config, reload_config, repo_root, save_config, validate_config
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import acknowledge_error, get_unacknowledged, log_error, unacknowledged_critical_count
@@ -350,6 +350,37 @@ def create_app(cfg=None):
             os.kill(pid, signal.SIGTERM)
         flash(f"SIGTERM sent to poller pid {pid}; the supervisor will restart it.", "ok")
         return redirect(url_for("index"))
+
+    # ----------------------------------------------------- monitoring (run 6)
+    @app.get("/monitoring")
+    @guarded
+    def monitoring():
+        now = datetime.now()
+        rows = fetch_all("SELECT * FROM courses ORDER BY active DESC, canvas_course_name")
+        for c in rows:
+            m = email_sender.milestones_for(c["id"], now)
+            for key in ("midterm", "final"):
+                r = m[key]
+                c[f"{key}_days"] = round((r["due_at"] - now).total_seconds() / 86400) if r and r["due_at"] else None
+                c[f"{key}_title"] = r["title"] if r else None
+        return render_template("course_monitoring.html", courses=rows)
+
+    @app.post("/monitoring/<int:course_id>")
+    @guarded
+    def monitoring_save(course_id):
+        f = request.form
+        execute_query("UPDATE courses SET monitor = %s, telegram_enabled = %s, email_enabled = %s, ical_course_code = %s WHERE id = %s",
+                      (f.get("monitor") == "on", f.get("telegram_enabled") == "on", f.get("email_enabled") == "on",
+                       (f.get("ical_course_code") or "").strip()[:50] or None, course_id))
+        flash("Monitoring settings saved.", "ok")
+        return redirect(url_for("monitoring"))
+
+    @app.post("/control/refresh_session")
+    @guarded
+    def control_refresh_session():
+        flash("The Canvas session must be refreshed by hand: SSH into the server and run  python pollers/canvas_scraper.py --login  "
+              "then approve the Duo Mobile push. The scraper resumes on its next cycle.", "ok")
+        return redirect(request.referrer or url_for("monitoring"))
 
     return app
 

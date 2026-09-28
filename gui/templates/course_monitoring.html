@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Athena · Monitoring{% endblock %}
+{% block content %}
+<h1>Course monitoring</h1>
+<p class="muted">ical_course_code must match the bracketed suffix in your Canvas iCal feed exactly, e.g. ECE-141-01. The iCal poller fills it in automatically when a course name contains the same department and number.</p>
+<form method="post" action="{{ url_for('control_refresh_session') }}"><button class="small">Canvas session expired?</button></form>
+{% for c in courses %}<form id="mon{{ c.id }}" method="post" action="{{ url_for('monitoring_save', course_id=c.id) }}"></form>{% endfor %}
+<table>
+  <tr><th>Course</th><th>iCal code</th><th>Monitor</th><th>Telegram</th><th>Email</th><th>Midterm</th><th>Final</th><th></th></tr>
+  {% for c in courses %}
+  <tr class="{{ 'inactive' if not c.active }}">
+    <td>{{ c.canvas_course_name }}{% if not c.active %} <span class="pill">inactive</span>{% endif %}</td>
+    <td><input form="mon{{ c.id }}" name="ical_course_code" value="{{ c.ical_course_code or '' }}" placeholder="ECE-141-01" size="12"></td>
+    <td><input form="mon{{ c.id }}" type="checkbox" name="monitor" {{ 'checked' if c.monitor }}></td>
+    <td><input form="mon{{ c.id }}" type="checkbox" name="telegram_enabled" {{ 'checked' if c.telegram_enabled }}></td>
+    <td><input form="mon{{ c.id }}" type="checkbox" name="email_enabled" {{ 'checked' if c.email_enabled }}></td>
+    <td>{% if c.midterm_days is not none %}<span title="{{ c.midterm_title }}">{{ c.midterm_days }} days</span>{% else %}<span class="muted">not detected</span>{% endif %}</td>
+    <td>{% if c.final_days is not none %}<span title="{{ c.final_title }}">{{ c.final_days }} days</span>{% else %}<span class="muted">not detected</span>{% endif %}</td>
+    <td><button form="mon{{ c.id }}" class="small">Save</button></td>
+  </tr>
+  {% else %}<tr><td colspan="8" class="muted">No courses yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}
