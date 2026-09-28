@@ -9,10 +9,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from core import aws_push, email_sender, professor_profiler, progress, schedule_builder, stress
+from core import aws_push, email_sender, notifier, professor_profiler, progress, schedule_builder, stress
 from core.config import ConfigError, get, load_config, repo_root, validate_config
 from core.supervisor import Supervisor
-from db.db import DBError, execute_query, fetch_one
+from db.db import DBError, execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
 
 SCRIPT = "main"
@@ -39,6 +39,24 @@ def _heartbeat(start=False):
                       "ON DUPLICATE KEY UPDATE pid=VALUES(pid), started_at=NOW(), last_heartbeat=NOW()", (os.getpid(),))
     else:
         execute_query("UPDATE process_state SET last_heartbeat=NOW() WHERE process_name='main'")
+
+
+def oura_stress_check(cfg):
+    """Run 6: alert once when today's latest intraday readiness sits well below the 14 row baseline."""
+    today = date.today()
+    cur = fetch_one("SELECT * FROM oura_intraday WHERE date = %s AND readiness_score IS NOT NULL ORDER BY poll_time DESC, id DESC LIMIT 1", (today,))
+    if not cur or cur["notified"]:
+        return None
+    base = fetch_all("SELECT readiness_score FROM oura_intraday WHERE date < %s AND readiness_score IS NOT NULL ORDER BY date DESC, poll_time DESC LIMIT 14", (today,))
+    if not base:
+        return None
+    baseline = sum(r["readiness_score"] for r in base) / len(base)
+    pct = float(get(cfg, "oura.stress_alert_threshold_pct", 15))
+    if cur["readiness_score"] < baseline * (1 - pct / 100):
+        notifier.send_stress_alert(cur["readiness_score"], baseline)
+        execute_query("UPDATE oura_intraday SET notified = TRUE, stress_high = TRUE, stress_threshold_used = %s WHERE id = %s", (pct, cur["id"]))
+        return cur["id"]
+    return None
 
 
 def run():
@@ -82,6 +100,7 @@ def run():
     if get(cfg, "aws.enabled", True):
         sched.add_job(_safe("aws push", aws_push.push_all), IntervalTrigger(seconds=int(get(cfg, "aws.push_seconds", 60))), id="aws")
     sched.add_job(_safe("heartbeat", _heartbeat), IntervalTrigger(seconds=60), id="heartbeat")
+    sched.add_job(_safe("oura stress check", lambda: oura_stress_check(cfg)), IntervalTrigger(minutes=60), id="oura_stress_check")
 
     def _handle(signum, frame):
         _stop.set()

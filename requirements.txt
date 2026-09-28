@@ -6,3 +6,6 @@ ruamel.yaml>=0.18,<1
 flask>=3.0,<4
 anthropic>=0.40,<2
 pypdf>=4.0,<7
+icalendar>=6.0,<8
+# playwright also needs a one time browser download after pip install: playwright install chromium
+playwright>=1.45,<2

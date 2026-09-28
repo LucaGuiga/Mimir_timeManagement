@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Athena · Courses{% endblock %}
 {% block content %}
-<h1>Course mapping</h1>
+<h1>Course mapping <a class="small" href="{{ url_for('monitoring') }}">monitoring settings</a></h1>
 <datalist id="repos">{% for r in repos %}<option value="{{ r }}">{% endfor %}</datalist>
 {% if not courses %}<p class="muted">No courses yet. The Canvas poller fills this table on its first cycle.</p>{% endif %}
 {% for c in courses %}

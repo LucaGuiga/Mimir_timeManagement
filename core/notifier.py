@@ -63,3 +63,28 @@ def send_warning(text):
 
 def send_critical(text):
     return send_message(CRITICAL_MARK + str(text))
+
+
+# ---- run 6 additions -------------------------------------------------------
+
+def _course_code(course):
+    return (course or {}).get("ical_course_code") or (course or {}).get("canvas_course_name") or "?"
+
+
+def send_assignment_reminder_24h(assignment, course):
+    due = assignment.get("due_at")
+    hours = max(0.0, (due - datetime.now()).total_seconds() / 3600) if due else 0.0
+    return send_critical(f"{assignment.get('title')} [{_course_code(course)}] due in {hours:.1f} hours. "
+                         f"Status: {assignment.get('status')}.")
+
+
+def send_stress_alert(current_score, baseline_score):
+    return send_warning(f"Stress above baseline: current {current_score:.0f} vs average {baseline_score:.0f}. Check your schedule.")
+
+
+def send_grade_notification(assignment, course, grade_percent):
+    return send_message(f"Grade posted: {assignment.get('title')} [{_course_code(course)}]: {grade_percent:.1f}%")
+
+
+def send_session_expired():
+    return send_warning("Canvas session expired. SSH into the server and run: python pollers/canvas_scraper.py --login")

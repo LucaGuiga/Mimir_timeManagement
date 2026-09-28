@@ -2,6 +2,7 @@
 -- Apply with: python -m db.db --init
 
 SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
 
 CREATE TABLE IF NOT EXISTS professor_profiles (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -31,8 +32,20 @@ CREATE TABLE IF NOT EXISTS courses (
   mapped BOOLEAN NOT NULL DEFAULT FALSE,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- run 6: monitoring flags, milestone pointers, and the bracketed code from the iCal SUMMARY (e.g. ECE-141-01)
+  monitor BOOLEAN NOT NULL DEFAULT TRUE,
+  telegram_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  email_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  midterm_assignment_id INT NULL,
+  final_assignment_id INT NULL,
+  ical_course_code VARCHAR(50) NULL,
   UNIQUE KEY uq_canvas_course_id (canvas_course_id),
   KEY ix_courses_professor (professor_id),
+  KEY ix_courses_ical_code (ical_course_code),
+  CONSTRAINT fk_courses_midterm FOREIGN KEY (midterm_assignment_id)
+    REFERENCES assignments (id) ON DELETE SET NULL,
+  CONSTRAINT fk_courses_final FOREIGN KEY (final_assignment_id)
+    REFERENCES assignments (id) ON DELETE SET NULL,
   KEY ix_courses_active (active),
   KEY ix_courses_mapped (mapped),
   KEY ix_courses_quarter (quarter),
@@ -56,7 +69,17 @@ CREATE TABLE IF NOT EXISTS assignments (
   profiled BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  -- run 6: iCal and scraper fields
+  canvas_assignment_url VARCHAR(500) NULL,
+  ical_uid VARCHAR(200) NULL,
+  is_midterm BOOLEAN NOT NULL DEFAULT FALSE,
+  is_final BOOLEAN NOT NULL DEFAULT FALSE,
+  grade_percent FLOAT NULL,
+  grade_detected_at DATETIME NULL,
+  reminder_24h_sent BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE KEY uq_canvas_assignment_id (canvas_assignment_id),
+  UNIQUE KEY uq_ical_uid (ical_uid),
+  KEY ix_assignments_grade_detected (grade_detected_at),
   KEY ix_assignments_course (course_id),
   KEY ix_assignments_due (due_at),
   KEY ix_assignments_status (status),
@@ -233,7 +256,7 @@ CREATE TABLE IF NOT EXISTS error_log (
 CREATE TABLE IF NOT EXISTS poll_metrics (
   id INT AUTO_INCREMENT PRIMARY KEY,
   timestamp DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  api_name ENUM('canvas','github','oura') NOT NULL,
+  api_name ENUM('canvas','github','oura','ical','scraper') NOT NULL,
   endpoint VARCHAR(512) NULL,
   response_time_us INT NULL,
   http_status SMALLINT NULL,
@@ -242,7 +265,7 @@ CREATE TABLE IF NOT EXISTS poll_metrics (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS poller_status (
-  api_name ENUM('canvas','github','oura') NOT NULL PRIMARY KEY,
+  api_name ENUM('canvas','github','oura','ical','scraper') NOT NULL PRIMARY KEY,
   state ENUM('running','paused','auth_failed','backoff') NOT NULL DEFAULT 'running',
   last_cycle_at DATETIME(6) NULL,
   last_cycle_duration_us INT NULL,
@@ -257,3 +280,18 @@ CREATE TABLE IF NOT EXISTS process_state (
   last_heartbeat DATETIME NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS oura_intraday (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  date DATE NOT NULL,
+  poll_time TIME NOT NULL,
+  readiness_score SMALLINT NULL,
+  hrv_avg FLOAT NULL,
+  stress_high BOOLEAN NOT NULL DEFAULT FALSE,
+  stress_threshold_used FLOAT NULL,
+  notified BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_oura_intraday_date (date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;

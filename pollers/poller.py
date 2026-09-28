@@ -12,10 +12,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 from core.config import ConfigError, get, load_config, repo_root, validate_config
 from db.db import execute_query
 from logs.error_handler import log_error
-from pollers import canvas, github, oura
+from pollers import canvas, canvas_scraper, github, ical_poller, oura
 
 SCRIPT = "poller"
-APIS = {"canvas": canvas, "github": github, "oura": oura}
+APIS = {"canvas": canvas, "github": github, "oura": oura, "ical": ical_poller, "scraper": canvas_scraper}
 _stop = threading.Event()
 _paused = set()
 _active = 0
@@ -106,6 +106,9 @@ def run():
     for i, hhmm in enumerate(get(cfg, "oura.poll_times", []) or []):
         h, m = (int(x) for x in str(hhmm).split(":"))
         scheduler.add_job(oura_job, CronTrigger(hour=h, minute=m), id="oura" if i == 0 else f"oura_{i}")
+    # run 6: iCal feed and Playwright scraper, same wrapper (poller_status row, heartbeat, AuthFailure pause)
+    scheduler.add_job(_job("ical", ical_poller, cfg, scheduler), IntervalTrigger(minutes=int(get(cfg, "ical.poll_minutes", 10))), id="ical")
+    scheduler.add_job(_job("scraper", canvas_scraper, cfg, scheduler), IntervalTrigger(minutes=int(get(cfg, "scraper.poll_minutes", 15))), id="scraper")
     for api in APIS:
         _set_state(api, "running")
 

@@ -1,0 +1,274 @@
+"""Playwright scraper for Canvas announcements, submission status, grades, and available dates.
+Uses cookies saved by `python pollers/canvas_scraper.py --login` (headed, Duo Mobile completed by hand)."""
+import json
+import os
+import re
+import sys
+import time
+import zlib
+from datetime import datetime
+
+from core import notifier
+from core.config import get, load_config, repo_root
+from db.db import execute_query, fetch_all, fetch_one
+from logs.error_handler import log_error
+
+SCRIPT = "scraper"
+COOKIE_PATH = "run/canvas_cookies.json"
+BASE_URL = "https://canvas.ucsc.edu"
+LOGIN_TIMEOUT_S = 60
+NAV_TIMEOUT_MS = 30000
+EXECUTABLE_PATH = None   # leave None for Playwright's bundled Chromium
+MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec"
+
+
+class AuthFailure(Exception):
+    """Present so the poller job wrapper can treat this module like the other pollers."""
+
+
+class SessionExpiredError(Exception):
+    pass
+
+
+def cookie_file(cfg=None):
+    rel = (get(cfg, "scraper.cookie_path") if cfg else None) or COOKIE_PATH
+    return rel if os.path.isabs(rel) else os.path.join(repo_root(), rel)
+
+
+def _launch(playwright, headless=True):
+    kw = {"headless": headless}
+    if EXECUTABLE_PATH:
+        kw["executable_path"] = EXECUTABLE_PATH
+    return playwright.chromium.launch(**kw)
+
+
+def _looks_like_login(page):
+    try:
+        if page.locator("input[type=password], form[action*='login'], #login_form").count():
+            return True
+    except Exception:
+        pass
+    return "log in" in (page.title() or "").lower() or "login" in page.url.lower()
+
+
+def load_session(playwright, cookie_path=None):
+    path = cookie_path or cookie_file()
+    browser = _launch(playwright, headless=True)
+    try:
+        context = browser.new_context()
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                context.add_cookies(json.load(f))
+        page = context.new_page()
+        page.set_default_timeout(NAV_TIMEOUT_MS)
+        page.goto(BASE_URL + "/", wait_until="domcontentloaded")
+        if "dashboard" in (page.title() or "").lower():
+            return browser, page
+        if _looks_like_login(page):
+            raise SessionExpiredError("Canvas session expired. Run: python pollers/canvas_scraper.py --login")
+        return browser, page
+    except Exception:
+        browser.close()
+        raise
+
+
+def interactive_login(playwright, cookie_path=None):
+    path = cookie_path or cookie_file()
+    browser = _launch(playwright, headless=False)
+    try:
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto(BASE_URL + "/login", wait_until="domcontentloaded")
+        print("Complete the UCSC login and approve the Duo Mobile push in the browser window.")
+        deadline = time.monotonic() + LOGIN_TIMEOUT_S
+        while time.monotonic() < deadline:
+            if "dashboard" in page.url.lower() or "dashboard" in (page.title() or "").lower():
+                break
+            time.sleep(1)
+        else:
+            print(f"Timed out after {LOGIN_TIMEOUT_S}s without reaching the Canvas dashboard; cookies not saved.")
+            return False
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(context.cookies(), f)
+        print(f"Canvas session saved to {path}")
+        return True
+    finally:
+        browser.close()
+
+
+def _metric(page_path, t0, status):
+    try:
+        execute_query("INSERT INTO poll_metrics (api_name, endpoint, response_time_us, http_status) VALUES (%s,%s,%s,%s)",
+                      ("scraper", page_path[:512], (time.perf_counter_ns() - t0) // 1000, status))
+    except Exception as e:
+        log_error(SCRIPT, type(e).__name__, "poll_metrics insert", str(e))
+
+
+def _goto(page, path):
+    t0 = time.perf_counter_ns()
+    resp = page.goto(BASE_URL + path, wait_until="networkidle")
+    _metric(path, t0, resp.status if resp else 0)
+    return resp
+
+
+def parse_canvas_date(text):
+    """Parses 'Sep 30 at 11:59pm', 'Sep 30, 2026 at 11:59pm', 'Oct 3 by 5pm', or ISO strings. Returns naive datetime or None."""
+    if not text:
+        return None
+    text = text.strip()
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
+    except ValueError:
+        pass
+    m = re.search(rf"\b({MONTHS})[a-z]*\.?\s+(\d{{1,2}})(?:,?\s+(\d{{4}}))?(?:\s+(?:at|by)\s+(\d{{1,2}})(?::(\d{{2}}))?\s*(am|pm)?)?", text, re.I)
+    if not m:
+        return None
+    mon = m.group(1)[:3].lower()
+    month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].index(mon) + 1
+    now = datetime.now()
+    year = int(m.group(3)) if m.group(3) else now.year
+    hour, minute = 23, 59
+    if m.group(4):
+        hour, minute = int(m.group(4)), int(m.group(5) or 0)
+        ap = (m.group(6) or "").lower()
+        if ap == "pm" and hour < 12:
+            hour += 12
+        if ap == "am" and hour == 12:
+            hour = 0
+    try:
+        dt = datetime(year, month, int(m.group(2)), hour, minute)
+    except ValueError:
+        return None
+    return dt
+
+
+def parse_grade_percent(text):
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:/|out of)\s*(\d+(?:\.\d+)?)", text or "", re.I)
+    if m and float(m.group(2)) > 0:
+        return round(100 * float(m.group(1)) / float(m.group(2)), 2)
+    m = re.search(r"(\d+(?:\.\d+)?)\s*%", text or "")
+    return float(m.group(1)) if m else None
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def scrape_announcements(page, course):
+    _goto(page, f"/courses/{course['canvas_course_id']}/announcements")
+    rows = page.locator(".ic-announcement-row, [data-testid='announcement-row'], .announcement-row")
+    n = rows.count()
+    if n == 0:
+        log_error(SCRIPT, "NoRows", f"announcements course {course['canvas_course_id']}", "no announcement rows found (page layout may have changed)")
+        return 0
+    new = 0
+    for i in range(n):
+        row = rows.nth(i)
+        title_el = row.locator("h3, .ic-item-row__content h3, a.ic-item-row__content-link").first
+        title = (title_el.inner_text() if title_el.count() else "").strip()[:512]
+        if not title:
+            continue
+        href = (row.locator("a[href*='discussion_topics']").first.get_attribute("href") if row.locator("a[href*='discussion_topics']").count() else "") or ""
+        m = re.search(r"/discussion_topics/(\d+)", href)
+        cid = int(m.group(1)) if m else -(zlib.crc32(f"{course['id']}|{title}".encode()) or 1)
+        body_el = row.locator(".ic-announcement-row__content, .ic-item-row__content p, .announcement-body").first
+        body = body_el.inner_text().strip() if body_el.count() else None
+        time_el = row.locator("time").first
+        posted = parse_canvas_date(time_el.get_attribute("datetime") or time_el.inner_text()) if time_el.count() else None
+        if fetch_one("SELECT id FROM announcements WHERE canvas_announcement_id = %s OR (course_id = %s AND title = %s AND posted_at <=> %s)",
+                     (cid, course["id"], title, posted)):
+            continue
+        execute_query("INSERT INTO announcements (course_id, canvas_announcement_id, title, body, posted_at, profiled) VALUES (%s,%s,%s,%s,%s,FALSE)",
+                      (course["id"], cid, title, body, posted))
+        new += 1
+    return new
+
+
+def scrape_assignments(page, course):
+    _goto(page, f"/courses/{course['canvas_course_id']}/assignments")
+    rows = page.locator(".ig-row, [data-testid='assignment-row'], .assignment-row")
+    n = rows.count()
+    if n == 0:
+        log_error(SCRIPT, "NoRows", f"assignments course {course['canvas_course_id']}", "no assignment rows found (page layout may have changed)")
+        return 0
+    known = {_norm(a["title"]): a for a in fetch_all("SELECT id, title, status, available_from, grade_percent FROM assignments WHERE course_id = %s", (course["id"],))}
+    updated = 0
+    for i in range(n):
+        row = rows.nth(i)
+        title_el = row.locator(".ig-title, a.ig-title, .assignment-title, h3 a").first
+        title = (title_el.inner_text() if title_el.count() else "").strip()
+        a = known.get(_norm(title))
+        if not a:
+            continue
+        text = row.inner_text()
+        sets, params = [], []
+        if a["available_from"] is None:
+            m = re.search(r"Available\s+(?:from|after|on)?\s*([^\n|]+?)(?:\s*\||\n|$)", text, re.I)
+            av = parse_canvas_date(m.group(1)) if m else None
+            if av:
+                sets.append("available_from = %s"); params.append(av)
+        low = text.lower()
+        new_status = "graded" if "graded" in low else "submitted" if "submitted" in low and "not submitted" not in low else None
+        if new_status and {"pending": 0, "open": 1, "submitted": 2, "graded": 3}[new_status] > {"pending": 0, "open": 1, "submitted": 2, "graded": 3}.get(a["status"], 0):
+            sets.append("status = %s"); params.append(new_status)
+            if new_status == "graded":
+                pct = parse_grade_percent(text)
+                if pct is not None and a["grade_percent"] is None:
+                    sets.append("grade_percent = %s"); params.append(pct)
+                    sets.append("grade_detected_at = %s"); params.append(datetime.now())
+        if sets:
+            execute_query(f"UPDATE assignments SET {', '.join(sets)} WHERE id = %s", params + [a["id"]])
+            updated += 1
+    return updated
+
+
+def run_cycle(cfg):
+    path = cookie_file(cfg)
+    if not os.path.exists(path):
+        log_error(SCRIPT, "NoSession", "run_cycle", f"{path} not found; run: python pollers/canvas_scraper.py --login")
+        return "paused"
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        try:
+            browser, page = load_session(p, path)
+        except SessionExpiredError as e:
+            log_error(SCRIPT, "SessionExpired", "load_session", str(e))
+            notifier.send_session_expired()
+            return "auth_failed"
+        except Exception as e:
+            log_error(SCRIPT, type(e).__name__, "load_session", str(e))
+            return None
+        courses = fetch_all("SELECT id, canvas_course_id, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE ORDER BY id")
+        try:
+            for i, course in enumerate(courses):
+                scrape_announcements(page, course)
+                scrape_assignments(page, course)
+                if i < len(courses) - 1:
+                    time.sleep(2)
+        except Exception as e:
+            log_error(SCRIPT, type(e).__name__, f"scrape {page.url}", str(e))
+            try:
+                shot = os.path.join(repo_root(), "logs", f"scraper_error_{datetime.now():%Y%m%d_%H%M%S}.png")
+                page.screenshot(path=shot)
+            except Exception as e2:
+                log_error(SCRIPT, type(e2).__name__, "screenshot", str(e2))
+        finally:
+            browser.close()
+    return None
+
+
+if __name__ == "__main__":
+    if "--login" in sys.argv:
+        from playwright.sync_api import sync_playwright
+        print("A Chromium window will open on the UCSC Canvas login page.")
+        print(f"Log in, approve the Duo Mobile push, and wait for the dashboard. You have {LOGIN_TIMEOUT_S} seconds.")
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = None
+        with sync_playwright() as p:
+            ok = interactive_login(p, cookie_file(cfg))
+        sys.exit(0 if ok else 1)
+    print("usage: python pollers/canvas_scraper.py --login")
+    sys.exit(1)

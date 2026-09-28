@@ -43,6 +43,8 @@ oura:
   backfill_days: 7
   # Index into poll_times of the poll that feeds the morning email
   morning_poll_index: 0
+  # Percentage below baseline readiness that triggers a Telegram stress alert
+  stress_alert_threshold_pct: 15
 
 anthropic:
   # Anthropic API key, used only by the GUI for on demand syllabus parsing
@@ -173,3 +175,23 @@ paths:
   run_dir: "run"
   # Directory for log files, relative to the repo root
   log_dir: "logs"
+
+ical:
+  # Full webcal:// or https:// URL from Canvas Calendar > Calendar Feed
+  feed_url: ""
+  # How often to poll the iCal feed in minutes
+  poll_minutes: 10
+
+scraper:
+  # How often to run the Playwright scraper in minutes
+  poll_minutes: 15
+  # Path to saved Canvas session cookies relative to repo root
+  cookie_path: "run/canvas_cookies.json"
+
+notifications:
+  # Days before a due date at which an assignment counts as needing a reminder
+  assignment_reminder_days: 3
+  # Hours before a due date for the urgent (Telegram) reminder
+  urgent_reminder_hours: 24
+  # A newly detected assignment due within this many hours triggers a Telegram warning
+  new_assignment_telegram_hours: 48
