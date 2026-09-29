@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from core import aws_push, email_sender, notifier, professor_profiler, progress, schedule_builder, stress
+from core import aws_push, email_sender, notifier, professor_profiler, progress, repo_manager, schedule_builder, stress
 from core.config import ConfigError, get, load_config, repo_root, validate_config
 from core.supervisor import Supervisor
 from db.db import DBError, execute_query, fetch_all, fetch_one
@@ -101,6 +101,8 @@ def run():
         sched.add_job(_safe("aws push", aws_push.push_all), IntervalTrigger(seconds=int(get(cfg, "aws.push_seconds", 60))), id="aws")
     sched.add_job(_safe("heartbeat", _heartbeat), IntervalTrigger(seconds=60), id="heartbeat")
     sched.add_job(_safe("oura stress check", lambda: oura_stress_check(cfg)), IntervalTrigger(minutes=60), id="oura_stress_check")
+    sched.add_job(_safe("repo manager", lambda: repo_manager.check_new_courses(cfg)), IntervalTrigger(seconds=60), id="repo_manager")
+    sched.add_job(_safe("assignment reminders", lambda: notifier.check_assignment_reminders(cfg)), CronTrigger(hour=8, minute=0), id="assignment_reminders")
 
     def _handle(signum, frame):
         _stop.set()

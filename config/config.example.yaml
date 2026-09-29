@@ -195,3 +195,13 @@ notifications:
   urgent_reminder_hours: 24
   # A newly detected assignment due within this many hours triggers a Telegram warning
   new_assignment_telegram_hours: 48
+
+repo_manager:
+  # Create a private GitHub repo automatically for every new monitored course
+  auto_create: true
+  # Branches created in each course repo; main is the default branch
+  default_branches: [main, hw, labs, tests, quizzes, projects, readings]
+  # Top level folders created in each course repo, matched positionally to default_branches after main
+  default_folders: [HW, Labs, Tests, Quizzes, Projects, Readings]
+  # Regex applied to the upper cased, space stripped Canvas course name to derive the repo name (ECE1, CSE30)
+  course_code_pattern: "[A-Z]+\\d+"

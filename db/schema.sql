@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS assignments (
   grade_percent FLOAT NULL,
   grade_detected_at DATETIME NULL,
   reminder_24h_sent BOOLEAN NOT NULL DEFAULT FALSE,
+  -- run 5: daily reminder dedup flag, reset every morning by notifier.check_assignment_reminders
+  reminder_sent_today BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE KEY uq_canvas_assignment_id (canvas_assignment_id),
   UNIQUE KEY uq_ical_uid (ical_uid),
   KEY ix_assignments_grade_detected (grade_detected_at),
@@ -292,6 +294,12 @@ CREATE TABLE IF NOT EXISTS oura_intraday (
   notified BOOLEAN NOT NULL DEFAULT FALSE,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_oura_intraday_date (date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  filename VARCHAR(255) UNIQUE NOT NULL,
+  applied_at DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

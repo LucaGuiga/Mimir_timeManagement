@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}Athena · Repos{% endblock %}
+{% block content %}
+<h1>Course repos</h1>
+<p class="muted">{% if auto_create %}Auto creation is on: every new monitored course gets a private GitHub repo within a minute.{% else %}Auto creation is off: use the create button to make a repo for an unmapped course.{% endif %}</p>
+<table>
+  <tr><th>Course</th><th>Repo</th><th>Branches</th><th>Mapped</th><th>Last commit</th><th></th></tr>
+  {% for c in courses %}
+  <tr class="{{ 'inactive' if not c.active }}">
+    <td>{{ c.canvas_course_name }}{% if not c.active %} <span class="pill">inactive</span>{% endif %}</td>
+    <td>{% if c.repo_url %}<a href="{{ c.repo_url }}" target="_blank" rel="noopener">{{ c.repo_name }}</a>{% elif c.repo_name %}{{ c.repo_name }}{% else %}<span class="muted">none{% if c.suggested %} (would be {{ c.suggested }}){% endif %}</span>{% endif %}</td>
+    <td>{% for b in c.branch_list %}<span class="pill">{{ b }}</span> {% endfor %}</td>
+    <td><span class="pill {{ 'green' if c.mapped else 'amber' }}">{{ 'mapped' if c.mapped else 'unmapped' }}</span></td>
+    <td>{{ c.last_commit|dt if c.last_commit else '–' }}</td>
+    <td>{% if not c.mapped and (not auto_create or not c.monitor) %}<form method="post" action="{{ url_for('repos_create', course_id=c.id) }}" data-confirm="Create a private GitHub repo for {{ c.canvas_course_name }}?"><button class="small">Create repo</button></form>{% elif not c.mapped %}<span class="muted">pending auto creation</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="muted">No courses yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}
