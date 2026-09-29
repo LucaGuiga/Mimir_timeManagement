@@ -88,3 +88,61 @@ def send_grade_notification(assignment, course, grade_percent):
 
 def send_session_expired():
     return send_warning("Canvas session expired. SSH into the server and run: python pollers/canvas_scraper.py --login")
+
+
+# ---- run 5 additions -------------------------------------------------------
+
+TYPE_LABELS = {"hw": "HW", "lab": "Lab", "test": "Test", "quiz": "Quiz", "project_milestone": "Project", "reading": "Reading", "other": "HW"}
+
+
+def branch_and_folder(assignment_type, cfg):
+    """Maps an assignment_type to (branch, folder) using repo_manager.default_branches / default_folders."""
+    branches = list(get(cfg, "repo_manager.default_branches", []) or [])
+    folders = list(get(cfg, "repo_manager.default_folders", []) or [])
+    label = TYPE_LABELS.get(assignment_type, "HW")
+    folder = next((f for f in folders if f.lower().startswith(label.lower())), folders[0] if folders else "HW")
+    non_main = [b for b in branches if b != "main"]
+    idx = folders.index(folder) if folder in folders else 0
+    branch = non_main[idx] if idx < len(non_main) else (non_main[0] if non_main else "main")
+    return branch, folder
+
+
+def send_assignment_reminder(assignment, course, cfg):
+    from core.naming_schema import format_expected
+    atype = assignment.get("assignment_type") or "other"
+    label = TYPE_LABELS.get(atype, "HW")
+    number = assignment.get("assignment_number") or 1
+    code = course.get("repo_name") or course.get("ical_course_code") or course.get("canvas_course_name") or "COURSE"
+    due = assignment.get("due_at")
+    days = max(0, int((due - datetime.now()).total_seconds() // 86400)) if due else 0
+    branch, folder = branch_and_folder(atype, cfg)
+    body = (f"{code} \u2014 {label} {number} due in {days} day(s)\n\n"
+            f"Upload to: {branch}/{folder}/{label}{number}/\n"
+            f"Files should be named: {format_expected(label, number, 'n', 'n', code)}\n\n"
+            f"Git commands:\n  git checkout {branch}\n  git add {folder}/{label}{number}/\n"
+            f"  git commit -m \"{label}{number} complete\"\n  git push origin {branch}")
+    return send_critical(body) if days == 0 else send_warning(body)
+
+
+def check_assignment_reminders(cfg):
+    """Daily 08:00 job: reset the dedup flag, then remind for everything due within assignment_reminder_days."""
+    from datetime import timedelta
+    from db.db import execute_query, fetch_all
+    days = float(get(cfg, "notifications.assignment_reminder_days", 3))
+    now = datetime.now()
+    sent = 0
+    try:
+        execute_query("UPDATE assignments SET reminder_sent_today = FALSE WHERE reminder_sent_today = TRUE")
+        rows = fetch_all(
+            "SELECT a.*, c.repo_name, c.ical_course_code, c.canvas_course_name FROM assignments a JOIN courses c ON c.id = a.course_id "
+            "WHERE a.status IN ('pending','open') AND a.reminder_sent_today = FALSE AND a.due_at IS NOT NULL "
+            "AND a.due_at >= %s AND a.due_at <= %s AND c.active = TRUE AND c.monitor = TRUE AND c.telegram_enabled = TRUE ORDER BY a.due_at",
+            (now - timedelta(days=1), now + timedelta(days=days)))
+        for a in rows:
+            if send_assignment_reminder(a, a, cfg):
+                execute_query("UPDATE assignments SET reminder_sent_today = TRUE WHERE id = %s", (a["id"],))
+                sent += 1
+    except Exception as e:
+        write_fallback({"script_name": "notifier", "error_type": type(e).__name__, "operation": "check_assignment_reminders",
+                        "raw_message": str(e), "severity": "warning"})
+    return sent

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Mimir naming schema pre-commit hook.
+# The installer copies this file to .git/hooks/pre-commit in each course repo and writes a .mimir file
+# in the repo root holding the absolute path to Mimir's config/config.yaml.
+# Every staged file under a category folder (HW/, Labs/, ...) must be named
+#   {Type}{number}_q{question}_part{part}_{COURSECODE}[.ext]     e.g. Lab1_q1_part0_ECE1.py
+# Errors block the commit; part companion warnings are printed but do not block.
+set -u
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+if [ ! -f "$ROOT/.mimir" ]; then
+  echo "mimir hook: no .mimir file in $ROOT, skipping naming check"
+  exit 0
+fi
+CFG="$(head -n1 "$ROOT/.mimir")"
+MIMIR="$(cd "$(dirname "$CFG")/.." 2>/dev/null && pwd)"
+if [ -z "$MIMIR" ] || [ ! -f "$MIMIR/scripts/validate_hook.py" ]; then
+  echo "mimir hook: cannot find Mimir at $MIMIR (from $CFG), skipping naming check"
+  exit 0
+fi
+PY="$MIMIR/venv/bin/python"
+[ -x "$PY" ] || PY="python3"
+mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR)
+[ "${#STAGED[@]}" -eq 0 ] && exit 0
+"$PY" "$MIMIR/scripts/validate_hook.py" "${STAGED[@]}"

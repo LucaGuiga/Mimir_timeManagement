@@ -6,7 +6,7 @@ import requests
 
 from core import notifier
 from core.config import get
-from db.db import execute_query, fetch_all
+from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
 
 SCRIPT = "oura"
@@ -113,4 +113,22 @@ def run_cycle(cfg):
     if not (sleep_scores.get(today) or sleeps.get(today)) and \
             _nearest_slot(cfg) == int(get(cfg, "oura.morning_poll_index", 0)):
         notifier.send_warning("No Oura sleep data for today yet. Open the Oura app to sync the ring.")
+    write_intraday_snapshot(cfg, None)
     return None
+
+
+def write_intraday_snapshot(cfg, conn=None):
+    """Run 5: copy today's readiness and HRV from oura_daily into one oura_intraday row per poll.
+    conn is accepted for signature compatibility; writes go through db.execute_query like the rest of the module."""
+    today = date.today()
+    try:
+        row = fetch_one("SELECT readiness_score, hrv_avg, missing FROM oura_daily WHERE date = %s", (today,))
+        if not row or row["missing"]:
+            return None
+        return execute_query(
+            "INSERT INTO oura_intraday (date, poll_time, readiness_score, hrv_avg, stress_high, stress_threshold_used, notified) "
+            "VALUES (%s, %s, %s, %s, FALSE, NULL, FALSE)",
+            (today, datetime.now().strftime("%H:%M:%S"), row["readiness_score"], row["hrv_avg"]))
+    except Exception as e:
+        log_error(SCRIPT, type(e).__name__, "write_intraday_snapshot", str(e))
+        return None

@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
-from core import email_sender, schedule_builder, stress, syllabus_parser
+from core import email_sender, repo_manager, schedule_builder, stress, syllabus_parser
 from core.config import ConfigError, get, load_config, reload_config, repo_root, save_config, validate_config
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import acknowledge_error, get_unacknowledged, log_error, unacknowledged_critical_count
@@ -381,6 +381,30 @@ def create_app(cfg=None):
         flash("The Canvas session must be refreshed by hand: SSH into the server and run  python pollers/canvas_scraper.py --login  "
               "then approve the Duo Mobile push. The scraper resumes on its next cycle.", "ok")
         return redirect(request.referrer or url_for("monitoring"))
+
+    # ----------------------------------------------------------- repos (run 5)
+    @app.get("/repos")
+    @guarded
+    def repos():
+        cfg = cfg_now()
+        rows = fetch_all("SELECT c.*, (SELECT MAX(g.commit_timestamp) FROM github_commits g WHERE g.course_id = c.id AND g.no_commit = FALSE) AS last_commit "
+                         "FROM courses c ORDER BY c.active DESC, c.canvas_course_name")
+        owner = get(cfg, "github.username") or ""
+        for r in rows:
+            r["branch_list"] = _jsonload(r["branches"], ["main"])
+            r["repo_url"] = f"https://github.com/{owner}/{r['repo_name']}" if r["repo_name"] and owner else None
+            r["suggested"] = repo_manager.course_code(r["canvas_course_name"], cfg)
+        return render_template("repos.html", courses=rows, auto_create=bool(get(cfg, "repo_manager.auto_create", True)))
+
+    @app.post("/repos/<int:course_id>/create")
+    @guarded
+    def repos_create(course_id):
+        course = fetch_one("SELECT * FROM courses WHERE id = %s", (course_id,))
+        if not course:
+            raise ValueError("course not found")
+        r = repo_manager.create_course_repo(cfg_now(), course)
+        flash(f"{course['canvas_course_name']}: {r['message']}", "ok" if r["ok"] else "error")
+        return redirect(url_for("repos"))
 
     return app
 
