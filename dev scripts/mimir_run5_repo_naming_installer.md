@@ -4,9 +4,11 @@
 
 ---
 
-You are adding run 5 features to Mimir, an academic management platform. Runs 1 to 4 exist and are on main. Before writing anything read in full: `db/schema.sql`, `config/config.yaml`, `core/config.py`, `db/db.py`, `logs/error_handler.py`, `core/notifier.py`, `pollers/canvas.py`, `pollers/github.py`, `core/main.py`, `core/supervisor.py`. Use their exact signatures and table columns. Do not modify any existing file unless a schema addition is required; if you add a column, add it to schema.sql and list the change at the end.
+You are adding run 5 features to Mimir, an academic management platform. Runs 1 to 4 and run 6 are all on main. Before writing anything read in full: `db/schema.sql`, `config/config.yaml`, `config/config.example.yaml`, `core/config.py`, `db/db.py`, `logs/error_handler.py`, `core/notifier.py`, `pollers/canvas.py`, `pollers/oura.py`, `pollers/github.py`, `core/main.py`, `core/supervisor.py`, `pollers/poller.py`, `gui/app.py`, `gui/templates/base.html`. Use their exact signatures and table columns. Do not modify any existing file unless a schema addition is required; if you add a column, add it to schema.sql and list the change at the end.
 
-This run creates exactly: `core/repo_manager.py`, `core/naming_schema.py`, `core/installer.py`, `scripts/install.sh`, `scripts/update.sh`, and one git hook template at `hooks/commit-msg.sample`. It also adds one new scheduled job to `core/main.py` and two new Flask routes to `gui/app.py`. Write every file in full. No placeholders, no stubs. Fill implementation gaps yourself; only surface product decisions.
+This run creates exactly: `core/repo_manager.py`, `core/naming_schema.py`, `core/installer.py`, `scripts/install.sh`, `scripts/update.sh`, and one git hook template at `hooks/commit-msg.sample`. It also adds one new scheduled job to `core/main.py`, two new Flask routes to `gui/app.py`, and one new template. Write every file in full. No placeholders, no stubs. Fill implementation gaps yourself; only surface product decisions.
+
+**Migration numbering**: run 6 already applied `002_run6_schema.sql`. This run's migration file is `003_add_reminder_sent_today.sql`. Never use 001_ or 002_ — those are taken.
 
 ---
 
@@ -14,11 +16,19 @@ This run creates exactly: `core/repo_manager.py`, `core/naming_schema.py`, `core
 
 `core/repo_manager.py`
 
-`create_course_repo(cfg, course)`: called when Mimir detects a new course through Canvas that has no repo yet. Uses the GitHub PAT from config with the GitHub REST API (no PyGithub, raw requests only, same pattern as `pollers/github.py`). Creates a new private repo under `github.username` named after the course code (e.g. `ECE1`, parsed from the Canvas course name). Initialises it with a README, then creates the following folder structure on the default branch by committing placeholder `.gitkeep` files: `HW/`, `Labs/`, `Tests/`, `Quizzes/`, `Projects/`, `Readings/`. Creates branches: `main` (default), `hw`, `labs`, `tests`, `quizzes`, `projects`, `readings`. Updates the `courses` table: sets `repo_name`, `repo_path_prefix`, `branches`, and `mapped` true. Sends a Telegram notification confirming the repo was created with its URL and the branch list. On any API failure logs to error_log and sends a Telegram warning without raising past the caller.
+`create_course_repo(cfg, course)`: called when Mimir detects a new course through Canvas that has no repo yet. Uses the GitHub PAT from config with the GitHub REST API (no PyGithub, raw requests only, same pattern as `pollers/github.py`). Creates a new private repo under `github.username` named after the course code (e.g. `ECE1`, parsed from the Canvas course name using `repo_manager.course_code_pattern`). Initialises it with a README, then creates the following folder structure on the default branch by committing placeholder `.gitkeep` files: `HW/`, `Labs/`, `Tests/`, `Quizzes/`, `Projects/`, `Readings/`. Creates branches: `main` (default), `hw`, `labs`, `tests`, `quizzes`, `projects`, `readings`. Updates the `courses` table: sets `repo_name`, `repo_path_prefix`, `branches`, and `mapped` true. Sends a Telegram notification confirming the repo was created with its URL and the branch list. On any API failure logs to error_log and sends a Telegram warning without raising past the caller.
 
-`check_new_courses(cfg)`: reads all active unmapped courses from the `courses` table and calls `create_course_repo` for each one. Called as a scheduled job in `core/main.py` every 60 seconds alongside the existing check children job. Only acts if `repo_manager.auto_create` is true in config (default true, so add that field to the config).
+`check_new_courses(cfg)`: reads all active unmapped courses from the `courses` table and calls `create_course_repo` for each one. Called as a scheduled job in `core/main.py` every 60 seconds. Only acts if `repo_manager.auto_create` is true in config. Run 6 already added `monitor`, `telegram_enabled`, and `email_enabled` columns to `courses`. The `check_new_courses` job should skip courses where `monitor` is false, since those are intentionally excluded from tracking.
 
-Add to `config/config.yaml` under a new `repo_manager` block: `auto_create` (boolean, default true), `default_branches` (list, default hw/labs/tests/quizzes/projects/readings/main), `default_folders` (list matching the branches), `course_code_pattern` (regex string used to parse the course code from the Canvas course name, default `[A-Z]+\d+`).
+Add to `config/config.yaml` and `config/config.example.yaml` under a new `repo_manager` block:
+
+```yaml
+repo_manager:
+  auto_create: true
+  default_branches: [main, hw, labs, tests, quizzes, projects, readings]
+  default_folders: [HW, Labs, Tests, Quizzes, Projects, Readings]
+  course_code_pattern: "[A-Z]+\\d+"
+```
 
 ---
 
@@ -47,7 +57,7 @@ Rules:
 
 `hooks/commit-msg.sample`
 
-A bash git hook script. Users copy this to `.git/hooks/pre-commit` in each course repo (the installer does this automatically, see Feature 4). On each commit it reads the list of staged files, calls a small Python helper `scripts/validate_hook.py` (also write this file) passing the staged filenames as arguments, exits 1 with the error messages printed if any file fails validation, and exits 0 otherwise. The part companion check described above runs here: if a staged file has part1 in the name, the hook checks whether a file with the same prefix but part2 is also staged or already exists in the repo, and warns if neither is true.
+A bash git hook script. Users copy this to `.git/hooks/pre-commit` in each course repo (the installer does this automatically, see Feature 5). On each commit it reads the list of staged files, calls a small Python helper `scripts/validate_hook.py` (also write this file) passing the staged filenames as arguments, exits 1 with the error messages printed if any file fails validation, and exits 0 otherwise. The part companion check described above runs here: if a staged file has part1 in the name, the hook checks whether a file with the same prefix but part2 is also staged or already exists in the repo, and warns if neither is true.
 
 `scripts/validate_hook.py`: a standalone script that takes filenames as argv, loads the config from a path stored in a `.mimir` file in the repo root (written by the installer), and calls `naming_schema.validate_filename` on each. Prints errors and warnings clearly. Exit code 1 if any errors, 0 otherwise with warnings printed as non blocking output.
 
@@ -74,11 +84,27 @@ Git commands:
 
 The branch and folder are derived from the assignment type using the `repo_manager.default_branches` and `default_folders` mapping in config. Days remaining is floored at 0. If days remaining is 0 the message opens with a critical marker instead of a warning marker.
 
-Add a new scheduled job to `core/main.py`: `notifier.check_assignment_reminders(cfg)` daily at 08:00. It reads all assignments with status pending or open, due within 3 days, and where a reminder has not been sent today (track with a new boolean column `reminder_sent_today` on the assignments table, reset to false each morning by the job before sending). Calls `send_assignment_reminder` for each. Add `reminder_sent_today BOOLEAN DEFAULT false` to the assignments table in schema.sql.
+Add a new scheduled job to `core/main.py`: `notifier.check_assignment_reminders(cfg)` daily at 08:00. The job resets `reminder_sent_today` to false for all assignments at the start of each run, then reads all assignments with status pending or open, due within `notifications.assignment_reminder_days` days, where `reminder_sent_today` is false. Calls `send_assignment_reminder` for each and sets `reminder_sent_today` true.
+
+Important: `reminder_sent_today` is a daily deduplication flag only — it resets every morning. It is entirely separate from `reminder_24h_sent`, which run 6 adds to assignments for a one time 24 hour urgent reminder that never resets. Do not create `reminder_24h_sent` here and do not reference it.
+
+Add `reminder_sent_today BOOLEAN DEFAULT false` to the assignments table in schema.sql and in `db/migrations/001_add_reminder_sent_today.sql`.
 
 ---
 
-## Feature 4: installer and updater
+## Feature 4: Oura intraday writer
+
+Run 6 is already merged and the `oura_intraday` table exists. Read `pollers/oura.py` in full before editing. Add a single new function `write_intraday_snapshot(cfg, conn)` at the bottom of the file. Call it at the end of every `run_cycle` execution, after the daily upsert is complete. The function:
+
+1. Fetches today's readiness score and hrv_avg from `oura_daily` for today's date. If the row does not exist or is marked missing, return without writing.
+2. Inserts one row into `oura_intraday` with: `date` = today, `poll_time` = current time (HH:MM:SS), `readiness_score` from the oura_daily row, `hrv_avg` from the oura_daily row, `stress_high` = false, `stress_threshold_used` = NULL, `notified` = false.
+3. Wraps the INSERT in try/except and logs any error to error_log. The table is guaranteed to exist since run 6 is on main.
+
+No other changes to oura.py.
+
+---
+
+## Feature 5: installer and updater
 
 `core/installer.py`
 
@@ -98,11 +124,11 @@ Add a new scheduled job to `core/main.py`: `notifier.check_assignment_reminders(
 1. Read the current config into memory.
 2. `git pull origin main`.
 3. Install any new requirements with `pip install -r requirements.txt` into the existing venv.
-4. Run any new schema migrations: compare the current table list against the schema and run only the missing CREATE TABLE statements and any ALTER statements listed in a new `db/migrations/` folder as sequentially numbered `.sql` files (e.g. `001_add_reminder_sent_today.sql`). Apply only migrations not yet recorded in a new `schema_migrations` table (id, filename, applied_at).
+4. Run any new schema migrations: read `schema_migrations` to find already applied filenames, scan `db/migrations/` for `.sql` files sorted numerically, apply only those not yet recorded. Each migration runs as a transaction where possible; on error log critical and stop. Record each applied file in `schema_migrations` with applied_at timestamp.
 5. Restart the Mimir service if systemd is available, otherwise print the manual restart command.
 6. Send a Telegram message "Mimir updated successfully".
 
-Add `db/migrations/001_add_reminder_sent_today.sql` as the first migration:
+`db/migrations/003_add_reminder_sent_today.sql`:
 
 ```sql
 ALTER TABLE assignments ADD COLUMN IF NOT EXISTS reminder_sent_today BOOLEAN DEFAULT false;
@@ -128,17 +154,17 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 Add to `gui/app.py`:
 
-`GET /repos`: lists all courses with their repo name, mapped status, branch list, and a link to the GitHub repo. Shows an auto create button for unmapped courses if `repo_manager.auto_create` is false (manual trigger).
+`GET /repos`: lists all courses with their repo name, mapped status, branch list, and a link to the GitHub repo. Shows a manual create button for unmapped courses when `repo_manager.auto_create` is false.
 
 `POST /repos/{course_id}/create`: manually triggers `repo_manager.create_course_repo` for one course. Returns the result as a flash message.
 
-Add a `repos.html` template under `gui/templates/`: one row per course, repo URL as a link, branches as tags, mapped status, last commit timestamp from the most recent `github_commits` row for that course, and the manual create button for unmapped ones.
+Add `gui/templates/repos.html`: one row per course, repo URL as a link, branches as tags, mapped status, last commit timestamp from the most recent `github_commits` row for that course, and the manual create button for unmapped ones. Add a nav link to `/repos` in `gui/templates/base.html`.
 
 ---
 
 ## Config additions summary
 
-Add to `config/config.yaml` and `config/config.example.yaml`:
+Add to `config/config.yaml` and `config/config.example.yaml` (additive only, do not remove existing keys):
 
 ```yaml
 repo_manager:
@@ -150,6 +176,8 @@ repo_manager:
 notifications:
   assignment_reminder_days: 3
 ```
+
+Note: run 6 already added `notifications.urgent_reminder_hours` and `notifications.new_assignment_telegram_hours` to this block in config. Read the existing config before writing — add only `assignment_reminder_days` if it is not already present.
 
 ---
 
