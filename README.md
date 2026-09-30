@@ -1,11 +1,11 @@
 # Mimir
 
-Mimir is a locally hosted academic management platform. It polls Canvas, GitHub, and Oura, keeps everything in MySQL, computes a daily stress ratio and schedule, sends morning and evening emails, and pushes snapshots to a small FastAPI app on AWS that serves a React dashboard.
+Mimir is a locally hosted academic management platform. It reads your Canvas iCal feed, and polls GitHub and Oura, keeps everything in MySQL, computes a daily stress ratio and schedule, sends morning and evening emails, and pushes snapshots to a small FastAPI app on AWS that serves a React dashboard.
 
 ## Process model
 
 1. `core/main.py` is the only process you launch. It supervises the poller and the GUI as child processes and restarts them if they die.
-2. `pollers/poller.py` polls Canvas and GitHub every minute and Oura four times a day. It writes only to MySQL.
+2. `pollers/poller.py` polls the iCal feed and GitHub on their intervals and Oura four times a day. It writes only to MySQL.
 3. `core/main.py` reads MySQL and writes derived tables: stress scores, schedule changes, professor profiles, hot zones, no commit rows.
 4. `gui/app.py` is the Flask GUI on the local network for mapping courses, editing the schedule, presets, and on demand syllabus parsing.
 5. `core/aws_push.py` posts JSON snapshots to the AWS FastAPI app every minute; that app serves the dashboard from SQLite. AWS holds no MySQL.
@@ -27,7 +27,7 @@ Mimir is a locally hosted academic management platform. It polls Canvas, GitHub,
    ```bash
    cp config/config.example.yaml config/config.yaml
    ```
-   Every key has a comment above it. The five tokens (`canvas.token`, `github.pat`, `oura.pat`, `anthropic.api_key`, `telegram.bot_token`), `telegram.chat_id`, and the whole `mysql` block are required. `aws.api_url` and `aws.api_token` point at the AWS app below. `config/config.yaml` is gitignored.
+   Every key has a comment above it. The tokens (`ical.feed_url`, `github.pat`, `oura.pat`, `anthropic.api_key`, `telegram.bot_token`), `telegram.chat_id`, and the whole `mysql` block are required. `aws.api_url` and `aws.api_token` point at the AWS app below. `config/config.yaml` is gitignored. There is no Canvas API integration; courses and assignments come only from the iCal feed. After first start, open `/setup` in the GUI to pick your courses and create their repos.
 4. Apply the schema and check connectivity:
    ```bash
    python -m db.db --init

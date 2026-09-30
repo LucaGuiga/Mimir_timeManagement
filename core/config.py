@@ -9,7 +9,7 @@ _lock = threading.Lock()
 _cache = {}
 
 REQUIRED_KEYS = [
-    "canvas.token", "github.pat", "oura.pat", "anthropic.api_key",
+    "ical.feed_url", "github.pat", "oura.pat", "anthropic.api_key",
     "telegram.bot_token", "telegram.chat_id",
     "mysql.host", "mysql.port", "mysql.user", "mysql.password", "mysql.db",
 ]

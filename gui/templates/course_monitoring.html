@@ -1,8 +1,7 @@
 {% extends "base.html" %}{% block title %}Mimir · Monitoring{% endblock %}
 {% block content %}
 <h1>Course monitoring</h1>
-<p class="muted">ical_course_code must match the bracketed suffix in your Canvas iCal feed exactly, e.g. ECE-141-01. The iCal poller fills it in automatically when a course name contains the same department and number.</p>
-<form method="post" action="{{ url_for('control_refresh_session') }}"><button class="small">Canvas session expired?</button></form>
+<p class="muted">ical_course_code must match the bracketed suffix in your iCal feed exactly, e.g. ECE-141-01. The iCal poller fills it in automatically when a course name contains the same department and number.</p>
 {% for c in courses %}<form id="mon{{ c.id }}" method="post" action="{{ url_for('monitoring_save', course_id=c.id) }}"></form>{% endfor %}
 <table>
   <tr><th>Course</th><th>iCal code</th><th>Monitor</th><th>Telegram</th><th>Email</th><th>Midterm</th><th>Final</th><th></th></tr>

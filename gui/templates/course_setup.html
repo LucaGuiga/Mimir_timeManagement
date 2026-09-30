@@ -48,7 +48,7 @@
 <p><a href="{{ url_for('index') }}">Go to dashboard →</a></p>
 {% else %}
 <h1>Course Setup</h1>
-<p>Mimir will read your Canvas iCal feed and detect your enrolled courses automatically.</p>
+<p>Mimir will read your iCal feed and detect your enrolled courses automatically.</p>
 <form method="post" action="{{ url_for('setup_fetch') }}"><button type="submit">Fetch Courses from iCal</button></form>
 {% endif %}
 {% endblock %}

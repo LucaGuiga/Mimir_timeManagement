@@ -1,7 +1,7 @@
 import React from 'react';
 import { usePoll, fmtTime, Stale } from '../api.js';
 
-const APIS = [['canvas', 'Canvas'], ['github', 'GitHub'], ['oura', 'Oura']];
+const APIS = [['ical', 'iCal'], ['github', 'GitHub'], ['oura', 'Oura']];
 
 export default function PollMetrics() {
   const { payload, stale, error } = usePoll('/poll_metrics/summary');

@@ -63,7 +63,7 @@ def build_snapshots(cfg=None):
         "SELECT api_name, AVG(response_time_us) AS avg_us FROM poll_metrics WHERE timestamp >= %s GROUP BY api_name", (now - timedelta(hours=1),))}
     snap["poll_metrics_summary"] = {api: {"last_poll": (status.get(api) or {}).get("last_cycle_at"),
                                           "avg_response_us": None if avg.get(api) is None else int(avg[api]),
-                                          "state": (status.get(api) or {}).get("state")} for api in ("canvas", "github", "oura")}
+                                          "state": (status.get(api) or {}).get("state")} for api in ("ical", "github", "oura")}
     for k in ("schedule_today", "commits_recent", "oura_recent"):
         for r in snap[k]:
             for f in ("moveable", "skipped", "no_commit", "missing"):

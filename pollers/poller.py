@@ -1,4 +1,4 @@
-"""Poller process: one BlockingScheduler, three jobs. Launched by core/main.py."""
+"""Poller process: one BlockingScheduler. Launched by core/main.py."""
 import os
 import signal
 import sys
@@ -12,10 +12,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 from core.config import ConfigError, get, load_config, repo_root, validate_config
 from db.db import execute_query
 from logs.error_handler import log_error
-from pollers import canvas, canvas_scraper, github, ical_poller, oura
+from pollers import github, ical_poller, oura
 
 SCRIPT = "poller"
-APIS = {"canvas": canvas, "github": github, "oura": oura, "ical": ical_poller, "scraper": canvas_scraper}
+APIS = {"github": github, "oura": oura, "ical": ical_poller}
 _stop = threading.Event()
 _paused = set()
 _active = 0
@@ -100,15 +100,17 @@ def run():
         f.write(str(os.getpid()))
     _heartbeat(start=True)
     scheduler = BlockingScheduler(job_defaults={"max_instances": 1, "coalesce": True, "misfire_grace_time": 30})
-    scheduler.add_job(_job("canvas", canvas, cfg, scheduler), IntervalTrigger(seconds=int(get(cfg, "canvas.poll_seconds", 60))), id="canvas")
     scheduler.add_job(_job("github", github, cfg, scheduler), IntervalTrigger(seconds=int(get(cfg, "github.poll_seconds", 60))), id="github")
     oura_job = _job("oura", oura, cfg, scheduler)
     for i, hhmm in enumerate(get(cfg, "oura.poll_times", []) or []):
         h, m = (int(x) for x in str(hhmm).split(":"))
         scheduler.add_job(oura_job, CronTrigger(hour=h, minute=m), id="oura" if i == 0 else f"oura_{i}")
-    # run 6: iCal feed and Playwright scraper, same wrapper (poller_status row, heartbeat, AuthFailure pause)
+    # iCal feed is the source of courses and assignments; same wrapper (poller_status row, heartbeat, AuthFailure pause)
     scheduler.add_job(_job("ical", ical_poller, cfg, scheduler), IntervalTrigger(minutes=int(get(cfg, "ical.poll_minutes", 10))), id="ical")
-    scheduler.add_job(_job("scraper", canvas_scraper, cfg, scheduler), IntervalTrigger(minutes=int(get(cfg, "scraper.poll_minutes", 15))), id="scraper")
+    if get(cfg, "scraper.enabled", False):
+        from pollers import canvas_scraper
+        APIS["scraper"] = canvas_scraper
+        scheduler.add_job(_job("scraper", canvas_scraper, cfg, scheduler), IntervalTrigger(minutes=int(get(cfg, "scraper.poll_minutes", 15))), id="scraper")
     for api in APIS:
         _set_state(api, "running")
 
