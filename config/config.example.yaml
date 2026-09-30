@@ -171,6 +171,24 @@ ical:
   # How often to poll the iCal feed in minutes
   poll_minutes: 10
 
+deepseek:
+  # Optional. Used by the scraper to read Canvas pages when the built-in page selectors find nothing.
+  enabled: false
+  api_key: ""
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+
+privacy:
+  # Swapped for a fake "John Doe" identity before any page text is sent to DeepSeek, and swapped back on the way in.
+  # List every spelling of you that appears on Canvas pages (Canvas shows your name in the top bar).
+  identity:
+    full_name: ""
+    first_name: ""
+    last_name: ""
+    emails: []
+    student_id: ""
+    usernames: []
+
 scraper:
   # Playwright scraper for Canvas web pages. Needs a logged in Canvas browser session, off by default.
   # Course and assignment data comes from the iCal feed alone.

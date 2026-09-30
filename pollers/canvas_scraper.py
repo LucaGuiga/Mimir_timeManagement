@@ -8,7 +8,9 @@ import time
 import zlib
 from datetime import datetime
 
-from core import notifier
+import hashlib
+
+from core import llm_parser, notifier
 from core.config import get, load_config, repo_root
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
@@ -155,10 +157,70 @@ def _norm(s):
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
 
-def scrape_announcements(page, course):
+_RANK = {"pending": 0, "open": 1, "submitted": 2, "graded": 3}
+
+
+def _page_changed(key, text):
+    """True when this page's text differs from the last run; records the new hash. Saves model calls."""
+    h = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+    row = fetch_one("SELECT content_hash FROM scrape_cache WHERE page_key = %s", (key,))
+    if row and row["content_hash"] == h:
+        return False
+    execute_query("INSERT INTO scrape_cache (page_key, content_hash, updated_at) VALUES (%s,%s,NOW()) "
+                  "ON DUPLICATE KEY UPDATE content_hash = VALUES(content_hash), updated_at = NOW()", (key, h))
+    return True
+
+
+def _apply_assignment(a, available_from, new_status, pct):
+    """Update one known assignment row. Only fills blanks and moves status forward. Returns True if it changed."""
+    sets, params = [], []
+    if a["available_from"] is None and available_from:
+        sets.append("available_from = %s"); params.append(available_from)
+    if new_status and _RANK[new_status] > _RANK.get(a["status"], 0):
+        sets.append("status = %s"); params.append(new_status)
+        if new_status == "graded" and pct is not None and a["grade_percent"] is None:
+            sets.append("grade_percent = %s"); params.append(pct)
+            sets.append("grade_detected_at = %s"); params.append(datetime.now())
+    if sets:
+        execute_query(f"UPDATE assignments SET {', '.join(sets)} WHERE id = %s", params + [a["id"]])
+    return bool(sets)
+
+
+def _llm_assignments(cfg, page, course):
+    text = page.inner_text("body")
+    if not _page_changed(f"assignments:{course['id']}", text):
+        return 0
+    known = {_norm(a["title"]): a for a in fetch_all("SELECT id, title, status, available_from, grade_percent FROM assignments WHERE course_id = %s", (course["id"],))}
+    updated = 0
+    for it in llm_parser.parse_page(cfg, "assignments", text):
+        a = known.get(_norm(it["title"]))
+        if a and _apply_assignment(a, it["available_from"], it["status"], it["grade_percent"]):
+            updated += 1
+    return updated
+
+
+def _llm_announcements(cfg, page, course):
+    text = page.inner_text("body")
+    if not _page_changed(f"announcements:{course['id']}", text):
+        return 0
+    new = 0
+    for it in llm_parser.parse_page(cfg, "announcements", text):
+        cid = -(zlib.crc32(f"{course['id']}|{it['title']}".encode()) or 1)
+        if fetch_one("SELECT id FROM announcements WHERE canvas_announcement_id = %s OR (course_id = %s AND title = %s AND posted_at <=> %s)",
+                     (cid, course["id"], it["title"], it["posted_at"])):
+            continue
+        execute_query("INSERT INTO announcements (course_id, canvas_announcement_id, title, body, posted_at, profiled) VALUES (%s,%s,%s,%s,%s,FALSE)",
+                      (course["id"], cid, it["title"], it["body"], it["posted_at"]))
+        new += 1
+    return new
+
+
+def scrape_announcements(page, course, cfg=None):
     _goto(page, f"/courses/{course['canvas_course_id']}/announcements")
     rows = page.locator(".ic-announcement-row, [data-testid='announcement-row'], .announcement-row")
     n = rows.count()
+    if n == 0 and cfg is not None and llm_parser.enabled(cfg):
+        return _llm_announcements(cfg, page, course)
     if n == 0:
         log_error(SCRIPT, "NoRows", f"announcements course {course['canvas_course_id']}", "no announcement rows found (page layout may have changed)")
         return 0
@@ -185,10 +247,12 @@ def scrape_announcements(page, course):
     return new
 
 
-def scrape_assignments(page, course):
+def scrape_assignments(page, course, cfg=None):
     _goto(page, f"/courses/{course['canvas_course_id']}/assignments")
     rows = page.locator(".ig-row, [data-testid='assignment-row'], .assignment-row")
     n = rows.count()
+    if n == 0 and cfg is not None and llm_parser.enabled(cfg):
+        return _llm_assignments(cfg, page, course)
     if n == 0:
         log_error(SCRIPT, "NoRows", f"assignments course {course['canvas_course_id']}", "no assignment rows found (page layout may have changed)")
         return 0
@@ -239,11 +303,11 @@ def run_cycle(cfg):
         except Exception as e:
             log_error(SCRIPT, type(e).__name__, "load_session", str(e))
             return None
-        courses = fetch_all("SELECT id, canvas_course_id, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE ORDER BY id")
+        courses = fetch_all("SELECT id, canvas_course_id, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE AND canvas_course_id > 0 ORDER BY id")
         try:
             for i, course in enumerate(courses):
-                scrape_announcements(page, course)
-                scrape_assignments(page, course)
+                scrape_announcements(page, course, cfg)
+                scrape_assignments(page, course, cfg)
                 if i < len(courses) - 1:
                     time.sleep(2)
         except Exception as e:
