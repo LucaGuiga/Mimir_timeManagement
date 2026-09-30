@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Athena{% endblock %}</title>
+<title>{% block title %}Mimir{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body{% if request.endpoint == 'index' %} data-autorefresh="60"{% endif %}>
@@ -16,8 +16,9 @@
 {% endif %}
 <header>
   <nav>
-    <a class="brand" href="{{ url_for('index') }}">Athena</a>
+    <a class="brand" href="{{ url_for('index') }}">Mimir</a>
     <a href="{{ url_for('courses') }}">Courses</a>
+    <a href="{{ url_for('setup') }}">Course Setup</a>
     <a href="{{ url_for('monitoring') }}">Monitoring</a>
     <a href="{{ url_for('repos') }}">Repos</a>
     <a href="{{ url_for('professors') }}">Professors</a>

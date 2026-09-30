@@ -1,4 +1,4 @@
-"""Athena supervisor process. The only process the startup script launches."""
+"""Mimir supervisor process. The only process the startup script launches."""
 import os
 import signal
 import sys

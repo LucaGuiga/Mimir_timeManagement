@@ -38,7 +38,7 @@ def _call(cfg, method, path, **kw):
 def _ensure_repo(cfg, owner, name):
     try:
         return _call(cfg, "POST", "/user/repos", json={"name": name, "private": True, "auto_init": True,
-                                                      "description": f"Course work for {name}, managed by Athena"}), True
+                                                      "description": f"Course work for {name}, managed by Mimir"}), True
     except RuntimeError as e:
         if "422" not in str(e):
             raise

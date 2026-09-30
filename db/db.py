@@ -27,7 +27,7 @@ def _pool_instance():
             cfg = load_config()
             try:
                 _pool = pooling.MySQLConnectionPool(
-                    pool_name="athena", pool_size=POOL_SIZE, pool_reset_session=True,
+                    pool_name="mimir", pool_size=POOL_SIZE, pool_reset_session=True,
                     host=get(cfg, "mysql.host", "127.0.0.1"),
                     port=int(get(cfg, "mysql.port", 3306)),
                     user=get(cfg, "mysql.user"), password=get(cfg, "mysql.password"),

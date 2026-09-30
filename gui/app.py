@@ -1,4 +1,4 @@
-"""Athena Flask GUI. Launched by core/main.py as `python -m gui.app`."""
+"""Mimir Flask GUI. Launched by core/main.py as `python -m gui.app`."""
 import functools
 import json
 import os
@@ -8,9 +8,9 @@ from datetime import date, datetime, timedelta
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
-from core import email_sender, repo_manager, schedule_builder, stress, syllabus_parser
+from core import email_sender, ical_bootstrap, repo_manager, schedule_builder, stress, syllabus_parser
 from core.config import ConfigError, get, load_config, reload_config, repo_root, save_config, validate_config
-from db.db import execute_query, fetch_all, fetch_one
+from db.db import execute_query, fetch_all, fetch_one, get_connection
 from logs.error_handler import acknowledge_error, get_unacknowledged, log_error, unacknowledged_critical_count
 from pollers.canvas import find_syllabus_sources
 
@@ -405,6 +405,79 @@ def create_app(cfg=None):
         r = repo_manager.create_course_repo(cfg_now(), course)
         flash(f"{course['canvas_course_name']}: {r['message']}", "ok" if r["ok"] else "error")
         return redirect(url_for("repos"))
+
+    # ------------------------------------------------- course setup (run 7)
+    @app.get("/setup")
+    @guarded
+    def setup():
+        step = request.args.get("step", "fetch")
+        if step == "select":
+            courses = session.get("bootstrap_courses")
+            if not courses:
+                return redirect(url_for("setup"))
+            return render_template("course_setup.html", step="select", courses=courses)
+        if step == "preview":
+            seeded = session.get("seeded_courses")
+            if not seeded:
+                return redirect(url_for("setup"))
+            return render_template("course_setup.html", step="preview", preview=ical_bootstrap.preview_repos(cfg_now(), seeded),
+                                   seeded={c["id"]: c for c in seeded})
+        if step == "done":
+            rows = fetch_all("SELECT * FROM courses WHERE setup_complete = TRUE ORDER BY canvas_course_name")
+            return render_template("course_setup.html", step="done", courses=rows)
+        return render_template("course_setup.html", step="fetch")
+
+    @app.post("/setup/fetch")
+    @guarded
+    def setup_fetch():
+        try:
+            session["bootstrap_courses"] = ical_bootstrap.fetch_and_parse(cfg_now())
+        except ical_bootstrap.BootstrapError as e:
+            flash(e.message, "error")
+            return redirect(url_for("setup"))
+        return redirect(url_for("setup", step="select"))
+
+    @app.post("/setup/seed")
+    @guarded
+    def setup_seed():
+        known = {c["ical_course_code"]: c for c in session.get("bootstrap_courses") or []}
+        if not known:
+            return redirect(url_for("setup"))
+        selections = []
+        for code in request.form.getlist("selected_codes"):
+            if code in known:
+                selections.append({**known[code], "monitor": f"monitor_{code}" in request.form})
+        if not selections:
+            flash("Select at least one course.", "error")
+            return redirect(url_for("setup", step="select"))
+        with get_connection() as conn:
+            session["seeded_courses"] = ical_bootstrap.seed_courses(cfg_now(), conn, selections)
+        return redirect(url_for("setup", step="preview"))
+
+    @app.post("/setup/create")
+    @guarded
+    def setup_create():
+        cfg = cfg_now()
+        seeded = session.get("seeded_courses")
+        if not seeded:
+            return redirect(url_for("setup"))
+        names = {p["course_id"]: p["repo_name"] for p in ical_bootstrap.preview_repos(cfg, seeded)}
+        ok, failed = [], []
+        for c in seeded:
+            if not c.get("monitor"):
+                continue
+            course = {"id": c["id"], "canvas_course_name": c["canvas_course_name"], "ical_course_code": c["ical_course_code"],
+                      "is_lab": c["is_lab"], "repo_name": names[c["id"]]}
+            r = repo_manager.create_course_repo(cfg, course)
+            (ok if r["ok"] else failed).append(c["id"])
+            if not r["ok"]:
+                flash(f"{c['ical_course_code']}: {r['message']}", "error")
+        for cid in ok:
+            execute_query("UPDATE courses SET setup_complete = TRUE WHERE id = %s", (cid,))
+        session.pop("bootstrap_courses", None)
+        session.pop("seeded_courses", None)
+        flash(f"Created {len(ok)} repos. {len(failed)} failed.", "ok" if not failed else "error")
+        return redirect(url_for("setup", step="done"))
 
     return app
 

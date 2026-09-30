@@ -1,0 +1,21 @@
+# Mimir API (FastAPI + uvicorn) systemd unit.
+# Install:
+#   sudo cp mimir_api.service /etc/systemd/system/mimir_api.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now mimir_api
+# Adjust User, Group, WorkingDirectory, and the venv path below to match the box.
+[Unit]
+Description=Mimir snapshot API and dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=mimir
+Group=mimir
+WorkingDirectory=/opt/mimir/api
+ExecStart=/opt/mimir/venv/bin/uvicorn fastapi_app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

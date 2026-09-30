@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts Athena: launches core/main.py, which supervises the poller and the GUI.
+# Starts Mimir: launches core/main.py, which supervises the poller and the GUI.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
@@ -31,7 +31,7 @@ rm -f run/main.pid run/poller.pid run/gui.pid
 nohup "$PY" -m core.main >> logs/main.out 2>&1 &
 MAIN_PID=$!
 log "started main pid $MAIN_PID"
-echo "athena main started, pid $MAIN_PID"
+echo "mimir main started, pid $MAIN_PID"
 
 # 5. Record the children once main has had time to launch them.
 (

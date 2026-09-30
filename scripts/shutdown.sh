@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stops Athena: SIGTERM to main, which cascades to the poller and GUI and waits for their cycles.
+# Stops Mimir: SIGTERM to main, which cascades to the poller and GUI and waits for their cycles.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
@@ -37,5 +37,5 @@ else
   log "shutdown: main exited cleanly"
 fi
 rm -f run/*.pid
-echo "athena stopped"
+echo "mimir stopped"
 exit 0

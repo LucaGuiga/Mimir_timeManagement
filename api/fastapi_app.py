@@ -1,4 +1,4 @@
-"""Athena snapshot receiver and dashboard host. Run: uvicorn fastapi_app:app --host ... --port ..."""
+"""Mimir snapshot receiver and dashboard host. Run: uvicorn fastapi_app:app --host ... --port ..."""
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -31,7 +31,7 @@ def load_config(path=None):
 def create_app(cfg=None):
     cfg = cfg or load_config()
     store = Store(cfg["sqlite_path"])
-    app = FastAPI(title="Athena API", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Mimir API", docs_url=None, redoc_url=None)
     app.add_middleware(CORSMiddleware, allow_origins=list(cfg["allowed_origins"]), allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
 
     def auth(request: Request):

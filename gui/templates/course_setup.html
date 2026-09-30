@@ -1,0 +1,54 @@
+{% extends "base.html" %}{% block title %}Mimir · Course Setup{% endblock %}
+{% block content %}
+{% if step == "select" %}
+<h1>Course Setup</h1>
+<p class="muted">Pick the courses to track. Labs are indented under their lecture; you can include either without the other.</p>
+<form method="post" action="{{ url_for('setup_seed') }}">
+<table>
+  <tr><th>Include</th><th>Course Code</th><th>Course Name</th><th>Type</th><th>Paired With</th><th>Monitor</th></tr>
+  {% macro row(c, lab) %}
+  <tr class="{{ 'lab-row' if lab }}">
+    <td><input type="checkbox" name="selected_codes" value="{{ c.ical_course_code }}"></td>
+    <td>{{ c.ical_course_code }}</td>
+    <td>{{ c.course_name }}</td>
+    <td>{{ 'Lab' if c.is_lab else 'Lecture' }}</td>
+    <td>{% if c.is_lab %}{{ c.lab_for }}{% else %}{% for l in courses if l.lab_for == c.ical_course_code %}{{ l.ical_course_code }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</td>
+    <td><input type="checkbox" name="monitor_{{ c.ical_course_code }}" checked></td>
+  </tr>
+  {% endmacro %}
+  {% for c in courses if not c.is_lab %}
+    {{ row(c, false) }}
+    {% for l in courses if l.is_lab and l.lab_for == c.ical_course_code %}{{ row(l, true) }}{% endfor %}
+  {% else %}<tr><td colspan="6" class="muted">No courses found in the feed.</td></tr>{% endfor %}
+</table>
+<button type="submit">Continue to Preview</button>
+</form>
+{% elif step == "preview" %}
+<h1>Repo Preview — Review before creating</h1>
+{% for p in preview %}
+<div class="repo-card"><dl>
+  <dt>Repo name</dt><dd>{{ p.repo_name }}</dd>
+  <dt>Course</dt><dd>{{ p.ical_course_code }} — {{ seeded[p.course_id].canvas_course_name }}{% if not seeded[p.course_id].monitor %} <span class="muted">(not monitored, no repo will be created)</span>{% endif %}</dd>
+  <dt>Type</dt><dd>{{ 'Lab section' if p.is_lab else 'Lecture' }}</dd>
+  <dt>Branches</dt><dd>{{ p.branches|join(', ') }}</dd>
+  <dt>Folders</dt><dd>{{ p.folders|join(', ') }}</dd>
+  {% if p.lab_folder_note %}<dt>Note</dt><dd>{{ p.lab_folder_note }}</dd>{% endif %}
+</dl></div>
+{% endfor %}
+<form method="post" action="{{ url_for('setup_create') }}"><button type="submit" class="btn-primary">Verify — Create Repos</button></form>
+<p><a href="{{ url_for('setup', step='select') }}">← Go back and change selection</a></p>
+{% elif step == "done" %}
+<h1>Setup Complete</h1>
+<p>The following courses are now tracked by Mimir:</p>
+<ul>
+  {% for c in courses %}<li>{{ c.ical_course_code }} — {{ c.canvas_course_name }}{% if c.is_lab %} (lab){% endif %}</li>
+  {% else %}<li class="muted">No courses have completed setup.</li>{% endfor %}
+</ul>
+<p><a href="{{ url_for('monitoring') }}">Configure monitoring settings →</a></p>
+<p><a href="{{ url_for('index') }}">Go to dashboard →</a></p>
+{% else %}
+<h1>Course Setup</h1>
+<p>Mimir will read your Canvas iCal feed and detect your enrolled courses automatically.</p>
+<form method="post" action="{{ url_for('setup_fetch') }}"><button type="submit">Fetch Courses from iCal</button></form>
+{% endif %}
+{% endblock %}
