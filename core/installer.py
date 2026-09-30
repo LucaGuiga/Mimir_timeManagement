@@ -168,7 +168,7 @@ def run_install(cfg_path=None):
     else:
         print("No mapped course repos yet; hooks are installed by rerunning the installer once repos exist.")
     # 6. systemd
-    unit_src, unit_dst = os.path.join(ROOT, "scripts", "athena.service"), "/etc/systemd/system/mimir.service"
+    unit_src, unit_dst = os.path.join(ROOT, "scripts", "mimir.service"), "/etc/systemd/system/mimir.service"
     if hasattr(os, "geteuid") and os.geteuid() == 0 and shutil.which("systemctl"):
         shutil.copy(unit_src, unit_dst); _run(["systemctl", "daemon-reload"]); _run(["systemctl", "enable", "mimir"])
         summary.append("installed and enabled mimir.service")

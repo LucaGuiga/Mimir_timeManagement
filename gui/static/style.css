@@ -44,3 +44,7 @@ button.small { padding:.2rem .5rem; font-size:.8rem; } button.danger { backgroun
 .pager a { margin-right:1rem; }
 code { background:#eef0f3; padding:.05rem .3rem; border-radius:4px; font-size:.85rem; }
 @media (max-width: 640px) { main { padding:.6rem; } table { font-size:.85rem; } th, td { padding:.3rem .25rem; } td.msg { max-width:200px; } }
+.repo-card { border:1px solid #ccc; border-radius:6px; padding:.6rem .9rem; margin:.6rem 0; }
+.repo-card dl { display:grid; grid-template-columns:7rem 1fr; gap:.15rem .6rem; margin:0; }
+.repo-card dt { font-weight:600; } .repo-card dd { margin:0; }
+tr.lab-row td:nth-child(2) { padding-left:2rem; }

@@ -11,7 +11,6 @@ import requests
 from core.config import get, load_config
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
-from pollers.canvas import AuthFailure, _request as canvas_request, find_syllabus_sources
 
 SCRIPT = "syllabus_parser"
 TYPES = ("hw", "quiz", "test", "lab", "project_milestone", "reading", "other")
@@ -85,29 +84,19 @@ def _course(course_id):
     return row
 
 
-def fetch_source(cfg, course_id, source):
-    """source is 'body' or a Canvas file id. Returns plain text."""
-    course = _course(course_id)
-    if source == "body":
-        body = find_syllabus_sources(cfg, course["canvas_course_id"]).get("syllabus_body")
-        if not body:
-            raise ValueError("this course has no syllabus body on Canvas")
-        return html_to_text(body)
-    meta = canvas_request(cfg, f"/api/v1/files/{int(source)}").json()
-    r = requests.get(meta["url"], headers={"Authorization": f"Bearer {get(cfg, 'canvas.token')}"}, timeout=60)
-    if r.status_code >= 400:
-        raise RuntimeError(f"file download failed with http {r.status_code}")
-    ctype = (meta.get("content-type") or meta.get("content_type") or r.headers.get("Content-Type") or "").lower()
-    name = (meta.get("display_name") or "").lower()
-    if "pdf" in ctype or name.endswith(".pdf"):
+def extract_text(filename, data):
+    """Plain text from an uploaded syllabus file (PDF, HTML, or text). Canvas is not involved."""
+    name = (filename or "").lower()
+    if name.endswith(".pdf") or data[:5] == b"%PDF-":
         from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(r.content))
+        reader = PdfReader(io.BytesIO(data))
         return "\n".join((p.extract_text() or "") for p in reader.pages).strip()
-    if "html" in ctype or name.endswith((".html", ".htm")):
-        return html_to_text(r.content.decode(r.encoding or "utf-8", errors="replace"))
-    if ctype.startswith("text/") or name.endswith((".txt", ".md")):
-        return r.content.decode(r.encoding or "utf-8", errors="replace")
-    raise ValueError(f"unsupported syllabus file type: {ctype or name or 'unknown'}")
+    text = data.decode("utf-8", errors="replace")
+    if name.endswith((".html", ".htm")):
+        return html_to_text(text)
+    if name.endswith((".txt", ".md", "")):
+        return text
+    raise ValueError(f"unsupported syllabus file type: {filename}")
 
 
 def spent_this_quarter(course_id, quarter):
@@ -258,9 +247,6 @@ def parse(cfg, course_id, raw_text):
         result.update(status="ok", matched=matched, unmatched=len(cleaned["items"]) - matched,
                       message=f"parsed {len(cleaned['items'])} items, {matched} matched, cost ${cost:.4f}")
         return result
-    except AuthFailure as e:
-        log_error(SCRIPT, "AuthFailure", f"parse course {course_id}", str(e), "critical")
-        result["message"] = f"Canvas rejected the token: {e}"
     except anthropic.AuthenticationError as e:
         log_error(SCRIPT, "AuthenticationError", f"parse course {course_id}", str(e), "critical")
         result["message"] = "Anthropic API key was rejected"

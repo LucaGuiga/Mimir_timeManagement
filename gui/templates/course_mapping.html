@@ -1,12 +1,12 @@
-{% extends "base.html" %}{% block title %}Athena · Courses{% endblock %}
+{% extends "base.html" %}{% block title %}Mimir · Courses{% endblock %}
 {% block content %}
 <h1>Course mapping <a class="small" href="{{ url_for('monitoring') }}">monitoring settings</a></h1>
 <datalist id="repos">{% for r in repos %}<option value="{{ r }}">{% endfor %}</datalist>
-{% if not courses %}<p class="muted">No courses yet. The Canvas poller fills this table on its first cycle.</p>{% endif %}
+{% if not courses %}<p class="muted">No courses yet. Add them on the Course Setup page.</p>{% endif %}
 {% for c in courses %}
 <div class="card {{ 'inactive' if not c.active }}">
   <h2>{{ c.canvas_course_name }} <span class="pill {{ 'green' if c.mapped else 'amber' }}">{{ 'mapped' if c.mapped else 'unmapped' }}</span>{% if not c.active %} <span class="pill">inactive</span>{% endif %}</h2>
-  <p class="muted">Canvas id {{ c.canvas_course_id }}{% if c.professor_name %} · {{ c.professor_name }}{% endif %}{% if c.quarter %} · {{ c.quarter }}{% endif %}</p>
+  <p class="muted">{{ c.ical_course_code or 'no iCal code' }}{% if c.professor_name %} · {{ c.professor_name }}{% endif %}{% if c.quarter %} · {{ c.quarter }}{% endif %}</p>
   {% if c.mapped %}<p>Current: <code>{{ c.repo_name }}</code> / <code>{{ c.repo_path_prefix or '' }}</code> on <code>{{ c.branches_text }}</code></p>{% endif %}
   <form method="post" action="{{ url_for('courses_map') }}" class="inline">
     <input type="hidden" name="course_id" value="{{ c.id }}">

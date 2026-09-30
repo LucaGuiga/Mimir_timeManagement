@@ -1,4 +1,4 @@
-"""Athena Flask GUI. Launched by core/main.py as `python -m gui.app`."""
+"""Mimir Flask GUI. Launched by core/main.py as `python -m gui.app`."""
 import functools
 import json
 import os
@@ -8,11 +8,10 @@ from datetime import date, datetime, timedelta
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
-from core import email_sender, repo_manager, schedule_builder, stress, syllabus_parser
+from core import email_sender, ical_bootstrap, repo_manager, schedule_builder, stress, syllabus_parser
 from core.config import ConfigError, get, load_config, reload_config, repo_root, save_config, validate_config
-from db.db import execute_query, fetch_all, fetch_one
+from db.db import execute_query, fetch_all, fetch_one, get_connection
 from logs.error_handler import acknowledge_error, get_unacknowledged, log_error, unacknowledged_critical_count
-from pollers.canvas import find_syllabus_sources
 
 SCRIPT = "gui"
 TYPES = ("hw", "quiz", "test", "lab", "project_milestone", "reading", "other")
@@ -79,7 +78,7 @@ def create_app(cfg=None):
             if ctx["critical_count"]:
                 ctx["latest_critical"] = fetch_one("SELECT * FROM error_log WHERE severity='critical' AND acknowledged=FALSE ORDER BY timestamp DESC LIMIT 1")
             rows = {r["api_name"]: r for r in fetch_all("SELECT * FROM poller_status")}
-            ctx["poller_status"] = [rows.get(a, {"api_name": a, "state": "unknown", "last_cycle_at": None}) for a in ("canvas", "github", "oura")]
+            ctx["poller_status"] = [rows.get(a, {"api_name": a, "state": "unknown", "last_cycle_at": None}) for a in ("ical", "github", "oura")]
         except Exception as e:
             ctx["banner_error"] = str(e)
         return ctx
@@ -97,7 +96,7 @@ def create_app(cfg=None):
             a["days_remaining"] = round((a["due_at"] - now).total_seconds() / 86400, 1)
         avg = {r["api_name"]: r for r in fetch_all("SELECT api_name, AVG(response_time_us) AS avg_us, MAX(timestamp) AS last FROM poll_metrics "
                                                     "WHERE timestamp >= %s GROUP BY api_name", (now - timedelta(hours=1),))}
-        metrics = [{"api": a, "avg_us": None if a not in avg else int(avg[a]["avg_us"]), "last": avg.get(a, {}).get("last")} for a in ("canvas", "github", "oura")]
+        metrics = [{"api": a, "avg_us": None if a not in avg else int(avg[a]["avg_us"]), "last": avg.get(a, {}).get("last")} for a in ("ical", "github", "oura")]
         return render_template("index.html", s=s, blocks=blocks, due=due, metrics=metrics)
 
     # -------------------------------------------------------------- courses
@@ -275,7 +274,6 @@ def create_app(cfg=None):
             c["parsed"] = fetch_one("SELECT * FROM syllabus_parsed WHERE course_id = %s AND quarter <=> %s ORDER BY id DESC LIMIT 1", (c["id"], quarter))
             c["spent"] = syllabus_parser.spent_this_quarter(c["id"], quarter)
             c["budget"] = budgets.get(c["canvas_course_name"])
-            c["sources"] = session.get(f"syl_{c['id']}")
             c["assignments"] = fetch_all("SELECT id, title FROM assignments WHERE course_id = %s ORDER BY title", (c["id"],))
             if c["parsed"]:
                 pj = _jsonload(c["parsed"]["parsed_json"], {})
@@ -286,21 +284,14 @@ def create_app(cfg=None):
                     it["matched_title"] = names.get(it.get("matched_assignment_id"))
         return render_template("syllabus_trigger.html", courses=rows, quarter=quarter, model=get(cfg, "anthropic.parse_model"))
 
-    @app.post("/syllabus/<int:course_id>/find")
-    @guarded
-    def syllabus_find(course_id):
-        course = fetch_one("SELECT canvas_course_id FROM courses WHERE id = %s", (course_id,))
-        found = find_syllabus_sources(cfg_now(), course["canvas_course_id"])
-        session[f"syl_{course_id}"] = {"has_body": bool(found.get("syllabus_body")),
-                                       "files": [{"id": f["id"], "display_name": f["display_name"]} for f in found.get("files", [])][:20]}
-        flash(f"Found {'a syllabus body' if found.get('syllabus_body') else 'no syllabus body'} and {len(found.get('files', []))} candidate files.", "ok")
-        return redirect(url_for("syllabus"))
-
     @app.post("/syllabus/<int:course_id>/parse")
     @guarded
     def syllabus_parse(course_id):
-        source = request.form.get("source") or "body"
-        text = syllabus_parser.fetch_source(cfg_now(), course_id, source)
+        upload = request.files.get("file")
+        if upload and upload.filename:
+            text = syllabus_parser.extract_text(upload.filename, upload.read())
+        else:
+            text = request.form.get("text") or ""
         r = syllabus_parser.parse(cfg_now(), course_id, text)
         flash(r["message"], "ok" if r["status"] == "ok" else "error")
         return redirect(url_for("syllabus"))
@@ -375,13 +366,6 @@ def create_app(cfg=None):
         flash("Monitoring settings saved.", "ok")
         return redirect(url_for("monitoring"))
 
-    @app.post("/control/refresh_session")
-    @guarded
-    def control_refresh_session():
-        flash("The Canvas session must be refreshed by hand: SSH into the server and run  python pollers/canvas_scraper.py --login  "
-              "then approve the Duo Mobile push. The scraper resumes on its next cycle.", "ok")
-        return redirect(request.referrer or url_for("monitoring"))
-
     # ----------------------------------------------------------- repos (run 5)
     @app.get("/repos")
     @guarded
@@ -405,6 +389,79 @@ def create_app(cfg=None):
         r = repo_manager.create_course_repo(cfg_now(), course)
         flash(f"{course['canvas_course_name']}: {r['message']}", "ok" if r["ok"] else "error")
         return redirect(url_for("repos"))
+
+    # ------------------------------------------------- course setup (run 7)
+    @app.get("/setup")
+    @guarded
+    def setup():
+        step = request.args.get("step", "fetch")
+        if step == "select":
+            courses = session.get("bootstrap_courses")
+            if not courses:
+                return redirect(url_for("setup"))
+            return render_template("course_setup.html", step="select", courses=courses)
+        if step == "preview":
+            seeded = session.get("seeded_courses")
+            if not seeded:
+                return redirect(url_for("setup"))
+            return render_template("course_setup.html", step="preview", preview=ical_bootstrap.preview_repos(cfg_now(), seeded),
+                                   seeded={c["id"]: c for c in seeded})
+        if step == "done":
+            rows = fetch_all("SELECT * FROM courses WHERE setup_complete = TRUE ORDER BY canvas_course_name")
+            return render_template("course_setup.html", step="done", courses=rows)
+        return render_template("course_setup.html", step="fetch")
+
+    @app.post("/setup/fetch")
+    @guarded
+    def setup_fetch():
+        try:
+            session["bootstrap_courses"] = ical_bootstrap.fetch_and_parse(cfg_now())
+        except ical_bootstrap.BootstrapError as e:
+            flash(e.message, "error")
+            return redirect(url_for("setup"))
+        return redirect(url_for("setup", step="select"))
+
+    @app.post("/setup/seed")
+    @guarded
+    def setup_seed():
+        known = {c["ical_course_code"]: c for c in session.get("bootstrap_courses") or []}
+        if not known:
+            return redirect(url_for("setup"))
+        selections = []
+        for code in request.form.getlist("selected_codes"):
+            if code in known:
+                selections.append({**known[code], "monitor": f"monitor_{code}" in request.form})
+        if not selections:
+            flash("Select at least one course.", "error")
+            return redirect(url_for("setup", step="select"))
+        with get_connection() as conn:
+            session["seeded_courses"] = ical_bootstrap.seed_courses(cfg_now(), conn, selections)
+        return redirect(url_for("setup", step="preview"))
+
+    @app.post("/setup/create")
+    @guarded
+    def setup_create():
+        cfg = cfg_now()
+        seeded = session.get("seeded_courses")
+        if not seeded:
+            return redirect(url_for("setup"))
+        names = {p["course_id"]: p["repo_name"] for p in ical_bootstrap.preview_repos(cfg, seeded)}
+        ok, failed = [], []
+        for c in seeded:
+            if not c.get("monitor"):
+                continue
+            course = {"id": c["id"], "canvas_course_name": c["canvas_course_name"], "ical_course_code": c["ical_course_code"],
+                      "is_lab": c["is_lab"], "repo_name": names[c["id"]]}
+            r = repo_manager.create_course_repo(cfg, course)
+            (ok if r["ok"] else failed).append(c["id"])
+            if not r["ok"]:
+                flash(f"{c['ical_course_code']}: {r['message']}", "error")
+        for cid in ok:
+            execute_query("UPDATE courses SET setup_complete = TRUE WHERE id = %s", (cid,))
+        session.pop("bootstrap_courses", None)
+        session.pop("seeded_courses", None)
+        flash(f"Created {len(ok)} repos. {len(failed)} failed.", "ok" if not failed else "error")
+        return redirect(url_for("setup", step="done"))
 
     return app
 

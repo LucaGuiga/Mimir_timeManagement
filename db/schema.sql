@@ -1,4 +1,4 @@
--- Athena schema. Idempotent: every statement is CREATE TABLE IF NOT EXISTS.
+-- Mimir schema. Idempotent: every statement is CREATE TABLE IF NOT EXISTS.
 -- Apply with: python -m db.db --init
 
 SET NAMES utf8mb4;
@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS courses (
   CONSTRAINT fk_courses_professor FOREIGN KEY (professor_id)
     REFERENCES professor_profiles (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- run 7: lab pairing (display only, no FK) and the setup GUI completion flag
+ALTER TABLE courses ADD COLUMN IF NOT EXISTS lab_parent_id INT NULL;
+ALTER TABLE courses ADD COLUMN IF NOT EXISTS is_lab BOOLEAN DEFAULT false;
+ALTER TABLE courses ADD COLUMN IF NOT EXISTS setup_complete BOOLEAN DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS assignments (
   id INT AUTO_INCREMENT PRIMARY KEY,

@@ -134,7 +134,7 @@ def send_morning(cfg=None):
                    "JOIN professor_profiles p ON p.id = h.professor_id WHERE h.day_of_week = %s ORDER BY p.professor_name, h.hour_start",
                    (today.weekday(),))
     parts.append(_section("Hot zones today (informational)", [f"{h['professor_name']}: {h['hour_start']:02d}:00-{h['hour_end']:02d}:00 ({h['source']})" for h in hz]))
-    return _send(cfg, f"Athena morning {today.isoformat()}", parts)
+    return _send(cfg, f"Mimir morning {today.isoformat()}", parts)
 
 
 def send_evening(cfg=None):
@@ -185,7 +185,7 @@ def send_evening(cfg=None):
     errors = [e for e in errors_for_date(today) if not e["acknowledged"]]
     if errors:
         parts.append(_section("Errors today (unacknowledged)", [f"[{e['severity']}] {e['script_name']} {e['operation']}: {(e['raw_message'] or '')[:160]}" for e in errors]))
-    ok = _send(cfg, f"Athena evening {today.isoformat()}", parts)
+    ok = _send(cfg, f"Mimir evening {today.isoformat()}", parts)
     if ok and changes:
         ph = ",".join(["%s"] * len(changes))
         execute_query(f"UPDATE assignment_changes SET reported = TRUE WHERE id IN ({ph})", [c["id"] for c in changes])

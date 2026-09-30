@@ -2,7 +2,7 @@
 -- Fresh installs get all of this from db/schema.sql via `python -m db.db --init`.
 -- ADD COLUMN IF NOT EXISTS, ADD INDEX IF NOT EXISTS, and ADD FOREIGN KEY IF NOT EXISTS are MariaDB syntax (10.0+).
 -- On MySQL 8 drop the IF NOT EXISTS clauses and run each statement once.
--- Apply with: mysql athena < db/migrations/002_run6_schema.sql
+-- Apply with: mysql mimir < db/migrations/002_run6_schema.sql
 
 ALTER TABLE courses ADD COLUMN IF NOT EXISTS monitor BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE courses ADD COLUMN IF NOT EXISTS telegram_enabled BOOLEAN NOT NULL DEFAULT TRUE;

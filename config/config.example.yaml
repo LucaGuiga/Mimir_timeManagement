@@ -1,16 +1,6 @@
 # Copy this file to config/config.yaml and fill in the secrets. config.yaml is gitignored.
-# Athena configuration. This file is the only source of secrets and settings.
+# Mimir configuration. This file is the only source of secrets and settings.
 # It is gitignored; copy it to a safe place before reinstalling.
-
-canvas:
-  # Canvas API access token (Account > Settings > New Access Token)
-  token: ""
-  # Canvas instance base URL
-  base_url: "https://canvas.ucsc.edu"
-  # Seconds between Canvas poll cycles
-  poll_seconds: 60
-  # Warn via Telegram when X-Rate-Limit-Remaining drops below this
-  rate_limit_warn_threshold: 100
 
 github:
   # GitHub personal access token with repo read scope
@@ -82,11 +72,11 @@ mysql:
   # MySQL port
   port: 3306
   # MySQL user
-  user: "athena"
+  user: "mimir"
   # MySQL password
   password: ""
   # Database name
-  db: "athena"
+  db: "mimir"
 
 aws:
   # Base URL of the FastAPI snapshot receiver on AWS
@@ -101,8 +91,7 @@ aws:
 # Human readable label for the current quarter, e.g. "Fall 2026"
 quarter_label: ""
 
-# Lowercase substrings matched against the Canvas assignment group name and
-# title to pick an assignment_type. First matching type wins, in this order.
+# Lowercase substrings matched against the assignment title (from the iCal feed) to pick an assignment_type. First matching type wins, in this order.
 assignment_type_keywords:
   test: [exam, midterm, final, test]
   quiz: [quiz]
@@ -177,12 +166,15 @@ paths:
   log_dir: "logs"
 
 ical:
-  # Full webcal:// or https:// URL from Canvas Calendar > Calendar Feed
+  # Required. Full webcal:// or https:// URL from Canvas Calendar > Calendar Feed. This is the only source of courses and assignments.
   feed_url: ""
   # How often to poll the iCal feed in minutes
   poll_minutes: 10
 
 scraper:
+  # Playwright scraper for Canvas web pages. Needs a logged in Canvas browser session, off by default.
+  # Course and assignment data comes from the iCal feed alone.
+  enabled: false
   # How often to run the Playwright scraper in minutes
   poll_minutes: 15
   # Path to saved Canvas session cookies relative to repo root
@@ -197,11 +189,12 @@ notifications:
   new_assignment_telegram_hours: 48
 
 repo_manager:
-  # Create a private GitHub repo automatically for every new monitored course
-  auto_create: true
+  # Create a private GitHub repo automatically for every new monitored course.
+  # false: repos are created only through the /setup GUI
+  auto_create: false
   # Branches created in each course repo; main is the default branch
   default_branches: [main, hw, labs, tests, quizzes, projects, readings]
   # Top level folders created in each course repo, matched positionally to default_branches after main
   default_folders: [HW, Labs, Tests, Quizzes, Projects, Readings]
-  # Regex applied to the upper cased, space stripped Canvas course name to derive the repo name (ECE1, CSE30)
+  # Regex applied to the upper cased, space stripped course name to derive the repo name (ECE1, CSE30)
   course_code_pattern: "[A-Z]+\\d+"
