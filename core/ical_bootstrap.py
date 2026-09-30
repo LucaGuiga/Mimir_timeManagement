@@ -49,14 +49,14 @@ def fetch_and_parse(cfg):
     try:
         r = requests.get(url, timeout=TIMEOUT)
     except requests.RequestException as e:
-        raise BootstrapError(f"could not fetch the iCal feed: {e}") from e
+        raise BootstrapError(f"could not fetch the iCal feed ({type(e).__name__}); check ical.feed_url") from e
     if r.status_code >= 400:
         raise BootstrapError(f"iCal feed returned http {r.status_code}")
     try:
         cal = Calendar.from_ical(r.content)
     except Exception as e:
         raise BootstrapError(f"iCal feed could not be parsed: {e}") from e
-    found, real_ids = {}, {}
+    found, real_ids, names = {}, {}, {}
     for ev in cal.walk("VEVENT"):
         summary = str(ev.get("SUMMARY") or "").strip()
         m = _CODE_RE.search(summary)
@@ -67,8 +67,14 @@ def fetch_and_parse(cfg):
             u = _COURSE_URL_RE.search(f"{ev.get('URL') or ''} {ev.get('DESCRIPTION') or ''}")
             if u:
                 real_ids[code] = int(u.group(1))
+        names.setdefault(code, []).append(summary[:m.start()].strip())
         if code not in found:
             found[code] = summary[:m.start()].strip()
+    if not found:
+        raise BootstrapError("the feed has no events ending in a [COURSE-CODE] suffix, so no courses could be detected")
+    # Canvas puts the ASSIGNMENT title before the bracket, so the text is not a course name. Use it only when the same
+    # title repeats across several events for that code; otherwise the code itself is the name.
+    found = {c: (n if len(names[c]) >= 2 and len(set(names[c])) == 1 and n else c) for c, n in found.items()}
     codes = set(found)
     out = []
     for code, name in found.items():
@@ -118,7 +124,7 @@ def seed_courses(cfg, conn, selections):
                 if cur.fetchone():
                     real = None   # already taken by another row
             if row:
-                cur.execute("UPDATE courses SET monitor = %s, telegram_enabled = TRUE, email_enabled = TRUE WHERE id = %s", (monitor, row["id"]))
+                cur.execute("UPDATE courses SET monitor = %s WHERE id = %s", (monitor, row["id"]))   # keep notification choices made on the Monitoring page
                 if real and row["canvas_course_id"] is not None and row["canvas_course_id"] < 0:
                     cur.execute("UPDATE courses SET canvas_course_id = %s WHERE id = %s", (int(real), row["id"]))
             else:

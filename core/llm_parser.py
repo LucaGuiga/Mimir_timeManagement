@@ -23,7 +23,10 @@ class LLMParseError(Exception):
 
 
 def enabled(cfg):
-    return bool(get(cfg, "deepseek.enabled", False) and get(cfg, "deepseek.api_key"))
+    """DeepSeek is only on when a key is set AND an identity is configured to be swapped out (fail closed)."""
+    ident = get(cfg, "privacy.identity", {}) or {}
+    has_identity = bool(ident.get("full_name") or (ident.get("first_name") and ident.get("last_name")))
+    return bool(get(cfg, "deepseek.enabled", False) and get(cfg, "deepseek.api_key") and has_identity)
 
 
 # ------------------------------------------------------------------ anonymising
@@ -34,7 +37,11 @@ def identity_pairs(cfg):
     def add(real, fake):
         if real and str(real).strip():
             pairs.append((str(real).strip(), fake))
-    add(ident.get("full_name"), ALIAS_FULL)
+    full = (ident.get("full_name") or "").strip()
+    add(full, ALIAS_FULL)
+    if " " in full:   # the same name as it appears in URLs, filenames and handles
+        for sep in ("%20", "+", "_", "-", ".", ""):
+            add(full.replace(" ", sep), ALIAS_FULL.replace(" ", sep))
     add(ident.get("first_name"), ALIAS_FIRST)
     add(ident.get("last_name"), ALIAS_LAST)
     for e in ident.get("emails") or []:
@@ -46,6 +53,10 @@ def identity_pairs(cfg):
 
 
 def _pattern(word):
+    """Plain substring for anything long or containing digits/@/separators (emails, ids, handles, glued or encoded names);
+    word boundaries only for short bare names so 'Luca' does not hit 'Lucario'."""
+    if len(word) >= 6 or re.search(r"[^A-Za-z]", word):
+        return re.compile(re.escape(word), re.I)
     return re.compile(r"(?<![A-Za-z0-9])" + re.escape(word) + r"(?![A-Za-z0-9])", re.I)
 
 
@@ -95,10 +106,21 @@ One item per announcement.""",
 
 def _call(cfg, system, user):
     url = (get(cfg, "deepseek.base_url", "https://api.deepseek.com") or "").rstrip("/") + "/chat/completions"
-    r = requests.post(url, timeout=TIMEOUT, headers={"Authorization": f"Bearer {get(cfg, 'deepseek.api_key')}"},
+    try:
+        r = _post(url, cfg, system, user)
+    except requests.RequestException as e:
+        raise LLMParseError(f"deepseek request failed: {type(e).__name__}") from e
+    return _decode(r)
+
+
+def _post(url, cfg, system, user):
+    return requests.post(url, timeout=TIMEOUT, headers={"Authorization": f"Bearer {get(cfg, 'deepseek.api_key')}"},
                       json={"model": get(cfg, "deepseek.model", "deepseek-chat"), "temperature": 0,
                             "response_format": {"type": "json_object"},
                             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+
+
+def _decode(r):
     if r.status_code >= 400:
         raise LLMParseError(f"deepseek http {r.status_code}: {r.text[:200]}")
     try:
@@ -151,6 +173,8 @@ def validate_announcements(data):
 def parse_page(cfg, kind, page_text):
     """kind is 'assignments' or 'announcements'. Returns validated items, identity restored. Raises LLMParseError."""
     text = anonymize(page_text, cfg)[:MAX_CHARS]
-    system = PROMPTS[kind].format(year=datetime.now().year) if "{year}" in PROMPTS[kind] else PROMPTS[kind]
+    if not identity_pairs(cfg):
+        raise LLMParseError("privacy.identity is empty; refusing to send page text to DeepSeek")
+    system = PROMPTS[kind].replace("{year}", str(datetime.now().year))
     data = restore(_call(cfg, system, text), cfg)
     return validate_assignments(data) if kind == "assignments" else validate_announcements(data)

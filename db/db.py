@@ -1,5 +1,6 @@
 """MySQL access. Never logs; the error handler depends on this module."""
 import os
+import re
 import sys
 import threading
 
@@ -152,6 +153,40 @@ def _split_statements(text):
     return out
 
 
+_ADD_COL = re.compile(r"^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+(.*?);?\s*$", re.I | re.S)
+_ADD_IDX = re.compile(r"^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s*(.*?);?\s*$", re.I | re.S)
+_ADD_FK = re.compile(r"^\s*ALTER\s+TABLE\s+(\w+)\s+ADD\s+FOREIGN\s+KEY\s+IF\s+NOT\s+EXISTS\s+(\w+)\s*(.*?);?\s*$", re.I | re.S)
+
+
+def execute_compat(cur, stmt):
+    """Runs one statement. MariaDB's ADD COLUMN/INDEX/FOREIGN KEY IF NOT EXISTS is rewritten as an information_schema
+    check plus a plain ALTER so the same SQL files work on MySQL 8."""
+    def exists(sql, *params):
+        cur.execute(sql, params)
+        return cur.fetchone()[0] > 0
+    m = _ADD_COL.match(stmt)
+    if m:
+        t, c, rest = m.groups()
+        if exists("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = %s AND column_name = %s", t, c):
+            return
+        stmt = f"ALTER TABLE {t} ADD COLUMN {c} {rest}"
+    else:
+        m = _ADD_IDX.match(stmt)
+        if m:
+            t, uniq, n, rest = m.groups()
+            if exists("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = %s AND index_name = %s", t, n):
+                return
+            stmt = f"ALTER TABLE {t} ADD {uniq or ''}INDEX {n} {rest}"
+        else:
+            m = _ADD_FK.match(stmt)
+            if m:
+                t, n, rest = m.groups()
+                if exists("SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema = DATABASE() AND table_name = %s AND constraint_name = %s", t, n):
+                    return
+                stmt = f"ALTER TABLE {t} ADD CONSTRAINT {n} FOREIGN KEY {rest}"
+    cur.execute(stmt)
+
+
 def apply_schema(path=SCHEMA_PATH):
     with open(path, encoding="utf-8") as f:
         statements = _split_statements(f.read())
@@ -160,7 +195,7 @@ def apply_schema(path=SCHEMA_PATH):
         cur = conn.cursor()
         try:
             for stmt in statements:
-                cur.execute(stmt)
+                execute_compat(cur, stmt)
             return len(statements)
         finally:
             cur.close()

@@ -67,7 +67,7 @@ def validate_filename(filename, cfg, siblings=None):
         result["errors"].append(e.user_message)
         return result
     pattern = get(cfg, "repo_manager.course_code_pattern", DEFAULT_CODE_PATTERN) if cfg else DEFAULT_CODE_PATTERN
-    if not re.fullmatch(pattern, p["course_code"]):
+    if not re.fullmatch(f"(?:{pattern})L?", p["course_code"]):   # optional L: lab section repos (ECE141L)
         result["valid"] = False
         result["errors"].append(f"{os.path.basename(filename)}: course code '{p['course_code']}' does not match the pattern {pattern}")
     if p["part"] >= 1:

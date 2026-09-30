@@ -171,8 +171,13 @@ ical:
   # How often to poll the iCal feed in minutes
   poll_minutes: 10
 
+flask:
+  # Random string that signs the GUI's session cookie (used by the /setup flow). Empty means a new key on every restart.
+  secret_key: ""
+
 deepseek:
   # Optional. Used by the scraper to read Canvas pages when the built-in page selectors find nothing.
+  # Only active when privacy.identity below is filled in; otherwise it stays off so real names are never sent.
   enabled: false
   api_key: ""
   base_url: "https://api.deepseek.com"

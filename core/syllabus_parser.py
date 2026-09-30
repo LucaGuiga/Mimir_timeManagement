@@ -94,7 +94,7 @@ def extract_text(filename, data):
     text = data.decode("utf-8", errors="replace")
     if name.endswith((".html", ".htm")):
         return html_to_text(text)
-    if name.endswith((".txt", ".md", "")):
+    if name.endswith((".txt", ".md")) or "." not in name:
         return text
     raise ValueError(f"unsupported syllabus file type: {filename}")
 

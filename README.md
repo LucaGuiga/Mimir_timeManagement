@@ -41,6 +41,10 @@ Mimir is a locally hosted academic management platform. It reads your Canvas iCa
    `logs/startup.log` records every start and stop with PIDs; `logs/main.out`, `logs/poller.out`, and `logs/gui.out` hold process output; `logs/fallback.log` catches errors that could not reach MySQL.
 6. Install the systemd unit so it starts at boot. Edit `User`, `WorkingDirectory`, and the two script paths in `scripts/mimir.service` first, then follow the commands in its header comment.
 
+Optional scraper: set `scraper.enabled: true`, run `playwright install chromium`, then `python pollers/canvas_scraper.py --login` (approve the Duo push). To let DeepSeek read pages when the built-in selectors find nothing, also set `deepseek.enabled`, `deepseek.api_key`, and fill `privacy.identity` (your name, emails, student id, usernames). DeepSeek stays off while `privacy.identity` is empty. Check the swap works with `python tests/scrape_identity_check.py`.
+
+The schema and migrations run on MariaDB 10.6+ and MySQL 8 (the MariaDB-only `IF NOT EXISTS` clauses are rewritten automatically).
+
 The GUI listens on `supervisor.gui_host:gui_port` (default `0.0.0.0:5000`).
 
 ## AWS setup

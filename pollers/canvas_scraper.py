@@ -160,15 +160,26 @@ def _norm(s):
 _RANK = {"pending": 0, "open": 1, "submitted": 2, "graded": 3}
 
 
+def _hash(text):
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
 def _page_changed(key, text):
-    """True when this page's text differs from the last run; records the new hash. Saves model calls."""
-    h = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+    """True when this page's text differs from the last successful parse. Does not record anything."""
     row = fetch_one("SELECT content_hash FROM scrape_cache WHERE page_key = %s", (key,))
-    if row and row["content_hash"] == h:
-        return False
+    return not (row and row["content_hash"] == _hash(text))
+
+
+def _mark_parsed(key, text):
+    """Called only after a parse succeeded and its results were written, so a failed page is retried next cycle."""
     execute_query("INSERT INTO scrape_cache (page_key, content_hash, updated_at) VALUES (%s,%s,NOW()) "
-                  "ON DUPLICATE KEY UPDATE content_hash = VALUES(content_hash), updated_at = NOW()", (key, h))
-    return True
+                  "ON DUPLICATE KEY UPDATE content_hash = VALUES(content_hash), updated_at = NOW()", (key, _hash(text)))
+
+
+def _llm_page_text(page):
+    if _looks_like_login(page):
+        raise SessionExpiredError("Canvas session expired. Run: python pollers/canvas_scraper.py --login")
+    return page.inner_text("body")
 
 
 def _apply_assignment(a, available_from, new_status, pct):
@@ -187,8 +198,9 @@ def _apply_assignment(a, available_from, new_status, pct):
 
 
 def _llm_assignments(cfg, page, course):
-    text = page.inner_text("body")
-    if not _page_changed(f"assignments:{course['id']}", text):
+    text = _llm_page_text(page)
+    key = f"assignments:{course['id']}"
+    if not _page_changed(key, text):
         return 0
     known = {_norm(a["title"]): a for a in fetch_all("SELECT id, title, status, available_from, grade_percent FROM assignments WHERE course_id = %s", (course["id"],))}
     updated = 0
@@ -196,22 +208,25 @@ def _llm_assignments(cfg, page, course):
         a = known.get(_norm(it["title"]))
         if a and _apply_assignment(a, it["available_from"], it["status"], it["grade_percent"]):
             updated += 1
+    _mark_parsed(key, text)
     return updated
 
 
 def _llm_announcements(cfg, page, course):
-    text = page.inner_text("body")
-    if not _page_changed(f"announcements:{course['id']}", text):
+    text = _llm_page_text(page)
+    key = f"announcements:{course['id']}"
+    if not _page_changed(key, text):
         return 0
     new = 0
     for it in llm_parser.parse_page(cfg, "announcements", text):
-        cid = -(zlib.crc32(f"{course['id']}|{it['title']}".encode()) or 1)
+        cid = -(zlib.crc32(f"{course['id']}|{it['title']}|{it['posted_at']}".encode()) or 1)
         if fetch_one("SELECT id FROM announcements WHERE canvas_announcement_id = %s OR (course_id = %s AND title = %s AND posted_at <=> %s)",
                      (cid, course["id"], it["title"], it["posted_at"])):
             continue
         execute_query("INSERT INTO announcements (course_id, canvas_announcement_id, title, body, posted_at, profiled) VALUES (%s,%s,%s,%s,%s,FALSE)",
                       (course["id"], cid, it["title"], it["body"], it["posted_at"]))
         new += 1
+    _mark_parsed(key, text)
     return new
 
 
@@ -306,8 +321,13 @@ def run_cycle(cfg):
         courses = fetch_all("SELECT id, canvas_course_id, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE AND canvas_course_id > 0 ORDER BY id")
         try:
             for i, course in enumerate(courses):
-                scrape_announcements(page, course, cfg)
-                scrape_assignments(page, course, cfg)
+                for fn in (scrape_announcements, scrape_assignments):
+                    try:
+                        fn(page, course, cfg)
+                    except SessionExpiredError:
+                        raise
+                    except llm_parser.LLMParseError as e:   # one bad model answer must not abort the other pages
+                        log_error(SCRIPT, "LLMParseError", f"{fn.__name__} course {course['id']}", str(e))
                 if i < len(courses) - 1:
                     time.sleep(2)
         except Exception as e:

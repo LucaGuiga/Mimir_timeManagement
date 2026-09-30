@@ -103,7 +103,7 @@ def create_course_repo(cfg, course):
 
 
 def check_new_courses(cfg):
-    if not get(cfg, "repo_manager.auto_create", True):
+    if not get(cfg, "repo_manager.auto_create", False):
         return 0
     rows = fetch_all("SELECT id, canvas_course_name, repo_name FROM courses WHERE active = TRUE AND mapped = FALSE AND monitor = TRUE")
     done = 0
