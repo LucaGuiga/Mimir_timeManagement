@@ -49,8 +49,8 @@ def _parse_date(s):
 
 def create_app(cfg=None):
     app = Flask(__name__, template_folder="templates", static_folder="static")
-    app.secret_key = os.urandom(32)
     app.config["cfg"] = cfg or load_config()
+    app.secret_key = get(app.config["cfg"], "flask.secret_key", "") or os.urandom(32)   # set flask.secret_key so sessions survive restarts
     app.jinja_env.filters["hhmm"] = _hhmm
     app.jinja_env.filters["dt"] = _dt
 
@@ -378,7 +378,7 @@ def create_app(cfg=None):
             r["branch_list"] = _jsonload(r["branches"], ["main"])
             r["repo_url"] = f"https://github.com/{owner}/{r['repo_name']}" if r["repo_name"] and owner else None
             r["suggested"] = repo_manager.course_code(r["canvas_course_name"], cfg)
-        return render_template("repos.html", courses=rows, auto_create=bool(get(cfg, "repo_manager.auto_create", True)))
+        return render_template("repos.html", courses=rows, auto_create=bool(get(cfg, "repo_manager.auto_create", False)))
 
     @app.post("/repos/<int:course_id>/create")
     @guarded

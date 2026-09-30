@@ -301,6 +301,12 @@ CREATE TABLE IF NOT EXISTS oura_intraday (
   INDEX idx_oura_intraday_date (date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS scrape_cache (
+  page_key VARCHAR(100) NOT NULL PRIMARY KEY,
+  content_hash CHAR(64) NOT NULL,
+  updated_at DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
   id INT AUTO_INCREMENT PRIMARY KEY,
   filename VARCHAR(255) UNIQUE NOT NULL,

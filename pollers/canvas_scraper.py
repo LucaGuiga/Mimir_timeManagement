@@ -8,7 +8,9 @@ import time
 import zlib
 from datetime import datetime
 
-from core import notifier
+import hashlib
+
+from core import llm_parser, notifier
 from core.config import get, load_config, repo_root
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
@@ -155,10 +157,85 @@ def _norm(s):
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
 
-def scrape_announcements(page, course):
+_RANK = {"pending": 0, "open": 1, "submitted": 2, "graded": 3}
+
+
+def _hash(text):
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _page_changed(key, text):
+    """True when this page's text differs from the last successful parse. Does not record anything."""
+    row = fetch_one("SELECT content_hash FROM scrape_cache WHERE page_key = %s", (key,))
+    return not (row and row["content_hash"] == _hash(text))
+
+
+def _mark_parsed(key, text):
+    """Called only after a parse succeeded and its results were written, so a failed page is retried next cycle."""
+    execute_query("INSERT INTO scrape_cache (page_key, content_hash, updated_at) VALUES (%s,%s,NOW()) "
+                  "ON DUPLICATE KEY UPDATE content_hash = VALUES(content_hash), updated_at = NOW()", (key, _hash(text)))
+
+
+def _llm_page_text(page):
+    if _looks_like_login(page):
+        raise SessionExpiredError("Canvas session expired. Run: python pollers/canvas_scraper.py --login")
+    return page.inner_text("body")
+
+
+def _apply_assignment(a, available_from, new_status, pct):
+    """Update one known assignment row. Only fills blanks and moves status forward. Returns True if it changed."""
+    sets, params = [], []
+    if a["available_from"] is None and available_from:
+        sets.append("available_from = %s"); params.append(available_from)
+    if new_status and _RANK[new_status] > _RANK.get(a["status"], 0):
+        sets.append("status = %s"); params.append(new_status)
+        if new_status == "graded" and pct is not None and a["grade_percent"] is None:
+            sets.append("grade_percent = %s"); params.append(pct)
+            sets.append("grade_detected_at = %s"); params.append(datetime.now())
+    if sets:
+        execute_query(f"UPDATE assignments SET {', '.join(sets)} WHERE id = %s", params + [a["id"]])
+    return bool(sets)
+
+
+def _llm_assignments(cfg, page, course):
+    text = _llm_page_text(page)
+    key = f"assignments:{course['id']}"
+    if not _page_changed(key, text):
+        return 0
+    known = {_norm(a["title"]): a for a in fetch_all("SELECT id, title, status, available_from, grade_percent FROM assignments WHERE course_id = %s", (course["id"],))}
+    updated = 0
+    for it in llm_parser.parse_page(cfg, "assignments", text):
+        a = known.get(_norm(it["title"]))
+        if a and _apply_assignment(a, it["available_from"], it["status"], it["grade_percent"]):
+            updated += 1
+    _mark_parsed(key, text)
+    return updated
+
+
+def _llm_announcements(cfg, page, course):
+    text = _llm_page_text(page)
+    key = f"announcements:{course['id']}"
+    if not _page_changed(key, text):
+        return 0
+    new = 0
+    for it in llm_parser.parse_page(cfg, "announcements", text):
+        cid = -(zlib.crc32(f"{course['id']}|{it['title']}|{it['posted_at']}".encode()) or 1)
+        if fetch_one("SELECT id FROM announcements WHERE canvas_announcement_id = %s OR (course_id = %s AND title = %s AND posted_at <=> %s)",
+                     (cid, course["id"], it["title"], it["posted_at"])):
+            continue
+        execute_query("INSERT INTO announcements (course_id, canvas_announcement_id, title, body, posted_at, profiled) VALUES (%s,%s,%s,%s,%s,FALSE)",
+                      (course["id"], cid, it["title"], it["body"], it["posted_at"]))
+        new += 1
+    _mark_parsed(key, text)
+    return new
+
+
+def scrape_announcements(page, course, cfg=None):
     _goto(page, f"/courses/{course['canvas_course_id']}/announcements")
     rows = page.locator(".ic-announcement-row, [data-testid='announcement-row'], .announcement-row")
     n = rows.count()
+    if n == 0 and cfg is not None and llm_parser.enabled(cfg):
+        return _llm_announcements(cfg, page, course)
     if n == 0:
         log_error(SCRIPT, "NoRows", f"announcements course {course['canvas_course_id']}", "no announcement rows found (page layout may have changed)")
         return 0
@@ -185,10 +262,12 @@ def scrape_announcements(page, course):
     return new
 
 
-def scrape_assignments(page, course):
+def scrape_assignments(page, course, cfg=None):
     _goto(page, f"/courses/{course['canvas_course_id']}/assignments")
     rows = page.locator(".ig-row, [data-testid='assignment-row'], .assignment-row")
     n = rows.count()
+    if n == 0 and cfg is not None and llm_parser.enabled(cfg):
+        return _llm_assignments(cfg, page, course)
     if n == 0:
         log_error(SCRIPT, "NoRows", f"assignments course {course['canvas_course_id']}", "no assignment rows found (page layout may have changed)")
         return 0
@@ -239,11 +318,16 @@ def run_cycle(cfg):
         except Exception as e:
             log_error(SCRIPT, type(e).__name__, "load_session", str(e))
             return None
-        courses = fetch_all("SELECT id, canvas_course_id, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE ORDER BY id")
+        courses = fetch_all("SELECT id, canvas_course_id, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE AND canvas_course_id > 0 ORDER BY id")
         try:
             for i, course in enumerate(courses):
-                scrape_announcements(page, course)
-                scrape_assignments(page, course)
+                for fn in (scrape_announcements, scrape_assignments):
+                    try:
+                        fn(page, course, cfg)
+                    except SessionExpiredError:
+                        raise
+                    except llm_parser.LLMParseError as e:   # one bad model answer must not abort the other pages
+                        log_error(SCRIPT, "LLMParseError", f"{fn.__name__} course {course['id']}", str(e))
                 if i < len(courses) - 1:
                     time.sleep(2)
         except Exception as e:

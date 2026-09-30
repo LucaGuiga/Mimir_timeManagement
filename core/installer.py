@@ -75,7 +75,7 @@ def record_all_migrations():
 
 def apply_pending_migrations():
     """Applies unrecorded db/migrations/*.sql in numeric order. Stops at the first failure. Returns (applied, failed)."""
-    from db.db import _split_statements, execute_query, fetch_all, get_connection
+    from db.db import _split_statements, execute_compat, execute_query, fetch_all, get_connection
     from logs.error_handler import log_error
     _ensure_migrations_table()
     done = {r["filename"] for r in fetch_all("SELECT filename FROM schema_migrations")}
@@ -91,7 +91,7 @@ def apply_pending_migrations():
                 cur = conn.cursor()
                 try:
                     for st in statements:
-                        cur.execute(st)
+                        execute_compat(cur, st)
                 finally:
                     cur.close()
             execute_query("INSERT INTO schema_migrations (filename, applied_at) VALUES (%s, %s)", (name, datetime.now()))
@@ -149,7 +149,14 @@ def run_install(cfg_path=None):
         save_config({"_path": cfg_path, "mysql": mysql}); cfg = reload_config(cfg_path)
     summary.append("MySQL reachable")
     # 4. schema
-    _run([_venv_bin("python"), "-m", "db.db", "--init"]); record_all_migrations(); summary.append("schema applied and migrations recorded")
+    from db.db import table_count
+    fresh = table_count() == 0
+    _run([_venv_bin("python"), "-m", "db.db", "--init"])
+    if fresh:
+        record_all_migrations(); summary.append("schema applied and migrations recorded")
+    else:
+        applied, failed = apply_pending_migrations()
+        summary.append(f"schema applied, migrations applied: {', '.join(applied) or 'none'}" + (f", FAILED {failed}" if failed else ""))
     # 5. hooks in course repos
     from db.db import fetch_all
     courses = fetch_all("SELECT canvas_course_name, repo_name FROM courses WHERE mapped = TRUE AND repo_name IS NOT NULL")

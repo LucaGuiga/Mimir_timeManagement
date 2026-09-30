@@ -12,6 +12,7 @@ from logs.error_handler import log_error
 SCRIPT = "ical_bootstrap"
 TIMEOUT = 15
 _CODE_RE = re.compile(r"\[([A-Z0-9\-]+)\]$")
+_COURSE_URL_RE = re.compile(r"/courses/(\d+)")
 _LAB_SEGMENT_RE = re.compile(r"^(\d+[A-Z]*)L$")
 
 
@@ -48,25 +49,38 @@ def fetch_and_parse(cfg):
     try:
         r = requests.get(url, timeout=TIMEOUT)
     except requests.RequestException as e:
-        raise BootstrapError(f"could not fetch the iCal feed: {e}") from e
+        raise BootstrapError(f"could not fetch the iCal feed ({type(e).__name__}); check ical.feed_url") from e
     if r.status_code >= 400:
         raise BootstrapError(f"iCal feed returned http {r.status_code}")
     try:
         cal = Calendar.from_ical(r.content)
     except Exception as e:
         raise BootstrapError(f"iCal feed could not be parsed: {e}") from e
-    found = {}
+    found, real_ids, names = {}, {}, {}
     for ev in cal.walk("VEVENT"):
         summary = str(ev.get("SUMMARY") or "").strip()
         m = _CODE_RE.search(summary)
-        if not m or m.group(1) in found:
+        if not m:
             continue
-        found[m.group(1)] = summary[:m.start()].strip()
+        code = m.group(1)
+        if code not in real_ids:
+            u = _COURSE_URL_RE.search(f"{ev.get('URL') or ''} {ev.get('DESCRIPTION') or ''}")
+            if u:
+                real_ids[code] = int(u.group(1))
+        names.setdefault(code, []).append(summary[:m.start()].strip())
+        if code not in found:
+            found[code] = summary[:m.start()].strip()
+    if not found:
+        raise BootstrapError("the feed has no events ending in a [COURSE-CODE] suffix, so no courses could be detected")
+    # Canvas puts the ASSIGNMENT title before the bracket, so the text is not a course name. Use it only when the same
+    # title repeats across several events for that code; otherwise the code itself is the name.
+    found = {c: (n if len(names[c]) >= 2 and len(set(names[c])) == 1 and n else c) for c, n in found.items()}
     codes = set(found)
     out = []
     for code, name in found.items():
         parent = _detect_lab_parent(code, codes)
-        out.append({"ical_course_code": code, "course_name": name, "is_lab": parent is not None, "lab_for": parent})
+        out.append({"ical_course_code": code, "course_name": name, "is_lab": parent is not None, "lab_for": parent,
+                    "canvas_course_id": real_ids.get(code)})
     out.sort(key=lambda c: (c["is_lab"], c["ical_course_code"]))
     return out
 
@@ -85,7 +99,7 @@ def repo_name_for(cfg, ical_course_code, is_lab=False):
 
 
 def _synthetic_id(cur, code):
-    """Deterministic negative id (python's hash() is randomised per process); probe past any collision."""
+    """Fallback negative id when the feed shows no real course id (python's hash() is randomised per process); probe past any collision."""
     n = zlib.crc32(code.encode("utf-8")) % 1000000 + 1
     while True:
         cur.execute("SELECT ical_course_code FROM courses WHERE canvas_course_id = %s", (-n,))
@@ -102,15 +116,22 @@ def seed_courses(cfg, conn, selections):
         for s in selections:
             code = s["ical_course_code"]
             monitor = bool(s.get("monitor"))
-            cur.execute("SELECT id FROM courses WHERE ical_course_code = %s LIMIT 1", (code,))
+            cur.execute("SELECT id, canvas_course_id FROM courses WHERE ical_course_code = %s LIMIT 1", (code,))
             row = cur.fetchone()
+            real = s.get("canvas_course_id")
+            if real:
+                cur.execute("SELECT id FROM courses WHERE canvas_course_id = %s", (int(real),))
+                if cur.fetchone():
+                    real = None   # already taken by another row
             if row:
-                cur.execute("UPDATE courses SET monitor = %s, telegram_enabled = TRUE, email_enabled = TRUE WHERE id = %s", (monitor, row["id"]))
+                cur.execute("UPDATE courses SET monitor = %s WHERE id = %s", (monitor, row["id"]))   # keep notification choices made on the Monitoring page
+                if real and row["canvas_course_id"] is not None and row["canvas_course_id"] < 0:
+                    cur.execute("UPDATE courses SET canvas_course_id = %s WHERE id = %s", (int(real), row["id"]))
             else:
                 cur.execute(
                     "INSERT INTO courses (canvas_course_id, canvas_course_name, ical_course_code, is_lab, monitor, telegram_enabled, "
                     "email_enabled, mapped, setup_complete) VALUES (%s,%s,%s,%s,%s,TRUE,TRUE,FALSE,FALSE)",
-                    (_synthetic_id(cur, code), (s.get("course_name") or code)[:255], code, bool(s.get("is_lab")), monitor))
+                    (int(real) if real else _synthetic_id(cur, code), (s.get("course_name") or code)[:255], code, bool(s.get("is_lab")), monitor))
             touched[code] = s
         for code, s in touched.items():
             if s.get("is_lab") and s.get("lab_for"):
