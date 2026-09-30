@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mimir API Privacy Policy</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 16px;color:#1a1a1a;background:#fff}
+@media(prefers-color-scheme:dark){body{color:#e6e6e6;background:#121212}a{color:#8ab4f8}}
+h1{font-size:1.6rem}h2{font-size:1.15rem;margin-top:1.8rem}nav{font-size:.9rem}
+</style>
+</head><body>
+<nav><a href="/privacy">Privacy Policy</a> &middot; <a href="/terms">Terms of Use</a> &middot; <a href="/">Dashboard</a></nav>
+<h1>Mimir API Privacy Policy</h1>
+<p><em>Last updated: September 30, 2026</em></p>
+
+<p>Mimir is a personal, self-hosted academic planner. This policy covers the Mimir API, the small web service that receives dashboard snapshots from the owner's local machine and serves the dashboard. It is run by the Mimir owner (&quot;we&quot;) for their own use and for people they explicitly invite.</p>
+
+<h2>What the API receives and stores</h2>
+<p>The local Mimir installation pushes snapshots about once a minute. Each snapshot is stored as JSON in a SQLite file on the API server. Only the latest copy of each snapshot is kept; new pushes overwrite old ones. Snapshots contain:</p>
+<ul>
+<li>Stress score for today and up to 90 days of history</li>
+<li>Upcoming assignments (course name, title, type, due date, status, commit counts)</li>
+<li>Today's schedule blocks</li>
+<li>Recent GitHub commit details (course, file path, file size, commit message, time)</li>
+<li>Recent Oura sleep and readiness data (scores, HRV, resting heart rate, sleep duration)</li>
+<li>Active error messages and polling health for the iCal, GitHub and Oura integrations</li>
+</ul>
+<p>Health data from Oura is sensitive. It is used only to compute the stress score and show it on the dashboard.</p>
+
+<h2>What the API does not store</h2>
+<p>The API does not hold your Canvas login, your GitHub or Oura tokens, your Anthropic key, or your Telegram credentials. Those stay in the local configuration file on the owner's machine. The API has no user accounts, no advertising, no analytics and no tracking cookies.</p>
+
+<h2>Access and authentication</h2>
+<p>Every data endpoint requires a shared bearer token. The dashboard bundle includes that token, so anyone who can load the dashboard page can read the data. The dashboard is meant to live on a private address and should not be shared publicly. Only the health endpoint (<code>/health</code>) and these two policy pages are open. The health endpoint returns a status and the age of the oldest snapshot, nothing else.</p>
+
+<h2>Logs</h2>
+<p>The web server and any reverse proxy in front of it may record standard request details such as IP address, time, path and status code, for troubleshooting and security. These are not used for profiling.</p>
+
+<h2>Sharing</h2>
+<p>We do not sell or share snapshot data. It is hosted on Amazon Web Services infrastructure, which processes it on our behalf. We may disclose data if the law requires it.</p>
+<p>Separately, the local Mimir app (not the API) talks to services you configure: your Canvas iCal feed, GitHub, Oura, an SMTP email server, Telegram, and the Anthropic API for syllabus parsing. Syllabus text you choose to parse is sent to Anthropic. Each of those services has its own privacy policy.</p>
+
+<h2>Retention and deletion</h2>
+<p>Snapshots are replaced on every push and are not archived. Stopping the local app stops new data. To delete everything, remove the SQLite file on the API server (<code>sqlite_path</code> in <code>api/config.yaml</code>). To request deletion of data held for you, open an issue at <a href="https://github.com/LucaGuiga/Mimir_timeManagement/issues">github.com/LucaGuiga/Mimir_timeManagement</a>.</p>
+
+<h2>Security</h2>
+<p>Use HTTPS in front of the API, keep the token secret, and rotate it if it leaks (change <code>api_token</code> on both ends and rebuild the dashboard). No system is perfectly secure, and we cannot promise otherwise.</p>
+
+<h2>Children</h2>
+<p>Mimir is not directed at children under 13 and does not knowingly collect their data.</p>
+
+<h2>Changes</h2>
+<p>We may update this policy. The date above shows the latest revision.</p>
+
+<h2>Contact</h2>
+<p>Questions: open an issue at <a href="https://github.com/LucaGuiga/Mimir_timeManagement/issues">github.com/LucaGuiga/Mimir_timeManagement</a>.</p>
+
+</body></html>

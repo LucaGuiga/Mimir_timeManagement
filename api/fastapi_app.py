@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import yaml
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from store import Store
@@ -94,6 +95,14 @@ def create_app(cfg=None):
     async def health():
         stamps = store.get_all_updated_at()
         return {"status": "ok", "keys": len(stamps), "oldest_updated_at": min(stamps.values()) if stamps else None}
+
+    @app.get("/privacy", include_in_schema=False)
+    async def privacy():
+        return FileResponse(os.path.join(HERE, "legal", "privacy.html"))
+
+    @app.get("/terms", include_in_schema=False)
+    async def terms():
+        return FileResponse(os.path.join(HERE, "legal", "terms.html"))
 
     dist = os.path.join(os.path.dirname(HERE), "frontend", "dist")
     if os.path.isdir(dist):

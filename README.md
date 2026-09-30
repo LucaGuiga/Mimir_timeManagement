@@ -61,6 +61,8 @@ The GUI listens on `supervisor.gui_host:gui_port` (default `0.0.0.0:5000`).
    The API serves `frontend/dist` at `/` once it exists.
 4. Install the unit: edit `User`, `Group`, `WorkingDirectory`, and the venv path in `api/mimir_api.service`, then follow the commands in its header comment. `GET /health` needs no token and reports the oldest snapshot time.
 
+The API serves a [privacy policy](api/legal/privacy.html) at `/privacy` and [terms of use](api/legal/terms.html) at `/terms`, both without a token.
+
 ### Token visibility
 
 The dashboard bundle contains `API_TOKEN`, so anyone who loads the page can read it and call the API. That is acceptable for a personal dashboard on an obscure subdomain. If that ever changes, put basic auth on the reverse proxy in front of uvicorn.
