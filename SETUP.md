@@ -1,18 +1,26 @@
 # Mimir setup
 
-Mimir uses one fixed port, 5000. The Oura redirect address is registered with that port, so do not change `supervisor.gui_port` unless you also register a new redirect address with Oura and update `oura.redirect_uri`. Always open the GUI as `http://localhost:5000` on the computer that runs Mimir.
+Mimir's GUI starts on port 5000 by default, with nothing to configure. The Oura redirect address is registered with that port, so do not change `supervisor.gui_port` unless you also register a new redirect address with Oura and update `oura.redirect_uri`. If another program already uses port 5000, the GUI cannot start, so check first (step 5). Always open the GUI as `http://localhost:5000` on the computer that runs Mimir.
 
 ## 1. Gather these first
 
-| What | Where it comes from | Config key |
-|---|---|---|
-| iCal feed URL | Canvas, Calendar, Calendar Feed. It contains a secret, treat it like a password. | `ical.feed_url` |
-| GitHub token and username | GitHub, Settings, Developer settings, personal access token with repo scope | `github.pat`, `github.username` |
-| Oura client id and secret | Oura developer portal, after registering an app (step 4) | `oura.client_id`, `oura.client_secret` |
-| Anthropic API key | console.anthropic.com | `anthropic.api_key` |
-| Telegram bot token and chat id | Message @BotFather to make a bot, send it /start, then read getUpdates for the chat id | `telegram.bot_token`, `telegram.chat_id` |
-| MySQL database | Step 2 | `mysql.*` |
-| Optional | SMTP login for emails, DeepSeek key, AWS API url and token | `email.*`, `deepseek.*`, `aws.*` |
+Required:
+
+- **iCal feed URL**: in Canvas, open Calendar, then Calendar Feed. The link contains a secret, so treat it like a password. Config key: `ical.feed_url`.
+- **GitHub token and username**: GitHub, Settings, Developer settings, personal access token with repo scope. Config keys: `github.pat` and `github.username`.
+- **Anthropic API key**: from console.anthropic.com. Config key: `anthropic.api_key`.
+- **Telegram bot token and chat id**: message @BotFather to make a bot, send the bot /start, then read getUpdates for the chat id. Config keys: `telegram.bot_token` and `telegram.chat_id`.
+- **MySQL database**: made in step 2. Config keys: the `mysql` block.
+
+Needed for Oura (you get these in step 4):
+
+- **Oura client id and secret**. Config keys: `oura.client_id` and `oura.client_secret`.
+
+Optional:
+
+- SMTP login for the morning and evening emails (`email.*`).
+- DeepSeek key for page reading (`deepseek.*`).
+- AWS API url and token for the dashboard (`aws.*`).
 
 ## 2. MySQL
 
@@ -25,6 +33,65 @@ GRANT ALL ON mimir.* TO 'mimir'@'127.0.0.1';
 ```
 
 Check what exists first with `SHOW DATABASES;` and `SELECT user,host FROM mysql.user;`. If your database is still named `athena`, either keep that name in `mysql.db` or create `mimir` fresh.
+
+### If you already created a database
+
+Use this to confirm what you made matches what Mimir expects. Run the commands in order and stop at the first one that fails.
+
+1. **The server is running and which one it is.**
+
+   ```bash
+   mysql --version
+   sudo systemctl status mysql        # or: sudo systemctl status mariadb
+   ```
+
+2. **The database and the user exist.** Log in as the admin user.
+
+   ```bash
+   mysql -u root -p -e "SHOW DATABASES; SELECT user,host FROM mysql.user;"
+   ```
+
+   You should see your database name (for example `mimir`) and your Mimir user. The `host` column matters: Mimir connects over TCP to `127.0.0.1`, so the user's host must be `127.0.0.1` or `%`. A user created as `'mimir'@'localhost'` is refused. If yours is `localhost`, create the `127.0.0.1` one with the commands above.
+
+3. **The user has rights on the database.**
+
+   ```bash
+   mysql -u root -p -e "SHOW GRANTS FOR 'mimir'@'127.0.0.1';"
+   ```
+
+   It should list `ALL PRIVILEGES ON mimir.*` (use your own database and user names).
+
+4. **The login works the way Mimir will use it.** This catches a wrong password, wrong host, or wrong port.
+
+   ```bash
+   mysql -h 127.0.0.1 -P 3306 -u mimir -p mimir -e "SELECT 1"
+   ```
+
+   If your server listens on another port, find it with `mysql -u root -p -e "SHOW VARIABLES LIKE 'port'"`.
+
+5. **The values in `config/config.yaml` match what you just tested.** In the `mysql` block: `host` is `127.0.0.1`, `port` is the port from step 4, `user` and `password` are what you logged in with, and `db` is the database name. Nothing else in Mimir reads these, so a typo here is the usual cause of a startup failure.
+
+6. **Mimir can connect.** From the repo folder with the virtual environment active:
+
+   ```bash
+   python -m db.db --check
+   ```
+
+   Success looks like `connected to mimir (MySQL 8.0..., N tables)`. Failures read like this:
+
+   - `1045 Access denied for user`: wrong user or password, or the user's host is wrong (step 2).
+   - `1049 Unknown database`: the `db` name does not exist (step 2).
+   - `2003 Can't connect to MySQL server`: the server is not running, or `host` or `port` is wrong (steps 1 and 4).
+
+7. **Bring the tables up to date.** This is safe on an empty database, a new one, or one from an older version of the project (including the old `athena` database), and safe to repeat.
+
+   ```bash
+   python -m db.db --init
+   python -c "from core.installer import apply_pending_migrations; print(apply_pending_migrations())"
+   python -m db.db --check
+   ```
+
+   The second command prints the migration files it applied, or an empty list if nothing was left. The last command now reports the table count. Keep the database name your `mysql.db` points to; there is no need to rename an old `athena` database.
 
 ## 3. Install
 
@@ -58,9 +125,19 @@ The redirect URI must match character for character: scheme, host, port, and pat
 
 ## 5. Start Mimir
 
+First make sure nothing else is using port 5000. On Ubuntu this command should print nothing:
+
+```bash
+sudo ss -ltnp | grep ':5000'
+```
+
+If it prints a line, the last column names the program using the port (a Docker registry and other web apps commonly use 5000). Stop or reconfigure that program, then continue.
+
 ```bash
 scripts/startup.sh
 ```
+
+Once it is running, `sudo ss -ltnp | grep ':5000'` should show a `python` process, and `http://localhost:5000/setup/oura` should open.
 
 Check `logs/startup.log`, `logs/main.out`, `logs/poller.out`, and `logs/gui.out`. Stop with `scripts/shutdown.sh`.
 
