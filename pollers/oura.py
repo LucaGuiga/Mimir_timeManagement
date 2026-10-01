@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 
 import requests
 
-from core import notifier
+from core import notifier, oura_auth
 from core.config import get
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
@@ -26,28 +26,39 @@ def _metric(endpoint, t0, status):
         log_error(SCRIPT, type(e).__name__, "poll_metrics insert", str(e))
 
 
+class RateLimited(Exception):
+    pass
+
+
 def _request(cfg, collection, start, end):
-    headers = {"Authorization": f"Bearer {get(cfg, 'oura.pat')}"}
-    data, token = [], None
+    token = oura_auth.get_access_token(cfg)
+    retried = False
+    data, next_token = [], None
     while True:
         params = {"start_date": start.isoformat(), "end_date": end.isoformat()}
-        if token:
-            params["next_token"] = token
+        if next_token:
+            params["next_token"] = next_token
         t0 = time.perf_counter_ns()
         try:
-            r = requests.get(f"{API}/{collection}", headers=headers, params=params, timeout=TIMEOUT)
+            r = requests.get(f"{API}/{collection}", headers={"Authorization": f"Bearer {token}"}, params=params, timeout=TIMEOUT)
         except requests.RequestException as e:
             _metric(f"/v2/usercollection/{collection}", t0, 0)
-            raise RuntimeError(f"oura request failed: {e}") from e
+            raise RuntimeError(f"oura request failed ({type(e).__name__})") from e
         _metric(f"/v2/usercollection/{collection}", t0, r.status_code)
         if r.status_code == 401:
-            raise AuthFailure(f"oura 401 on {collection}")
+            if retried:
+                raise oura_auth.NotConnected("Oura rejected the refreshed token")
+            retried = True
+            token = oura_auth.refresh(cfg, bad_token=token)     # raises NotConnected (and alerts once) if access was revoked
+            continue
+        if r.status_code == 429:
+            raise RateLimited(r.headers.get("Retry-After", "unknown"))
         if r.status_code >= 400:
             raise RuntimeError(f"oura {r.status_code} on {collection}: {r.text[:200]}")
         body = r.json()
         data.extend(body.get("data") or [])
-        token = body.get("next_token")
-        if not token:
+        next_token = body.get("next_token")
+        if not next_token:
             return data
 
 
@@ -80,6 +91,20 @@ def _long_sleep(docs):
 
 
 def run_cycle(cfg):
+    """Returns a poller state string when the cycle is skipped, else None."""
+    try:
+        return _run_cycle(cfg)
+    except oura_auth.NotConnected:
+        return "auth_failed"            # visible as needing attention; no error spam, and the job keeps running
+    except oura_auth.TemporaryError as e:
+        log_error(SCRIPT, "TemporaryError", "run_cycle", str(e))
+        return "backoff"
+    except RateLimited as e:
+        log_error(SCRIPT, "RateLimited", "run_cycle", f"oura 429, Retry-After {e}; skipping this cycle")
+        return "backoff"
+
+
+def _run_cycle(cfg):
     end = date.today()
     start = end - timedelta(days=int(get(cfg, "oura.backfill_days", 7)))
     sleep_scores = {d["day"]: d for d in _request(cfg, "daily_sleep", start, end) if d.get("day")}

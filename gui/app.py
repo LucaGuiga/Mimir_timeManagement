@@ -4,16 +4,20 @@ import json
 import os
 import signal
 import sys
+import threading
 from datetime import date, datetime, timedelta
+from urllib.parse import urlsplit
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
-from core import email_sender, ical_bootstrap, repo_manager, schedule_builder, stress, syllabus_parser
+from core import email_sender, ical_bootstrap, oura_auth, repo_manager, schedule_builder, stress, syllabus_parser
 from core.config import ConfigError, get, load_config, reload_config, repo_root, save_config, validate_config
 from db.db import execute_query, fetch_all, fetch_one, get_connection
+from pollers import oura as oura_poller
 from logs.error_handler import acknowledge_error, get_unacknowledged, log_error, unacknowledged_critical_count
 
 SCRIPT = "gui"
+LOOPBACK = ("127.0.0.1", "::1")
 TYPES = ("hw", "quiz", "test", "lab", "project_milestone", "reading", "other")
 CATEGORIES = ("class", "travel", "clubs", "chores", "fixed", "flexible")
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -462,6 +466,96 @@ def create_app(cfg=None):
         session.pop("seeded_courses", None)
         flash(f"Created {len(ok)} repos. {len(failed)} failed.", "ok" if not failed else "error")
         return redirect(url_for("setup", step="done"))
+
+    # ------------------------------------------------------- oura oauth
+    def oura_context():
+        cfg = cfg_now()
+        port = int(get(cfg, "supervisor.gui_port", 5000))
+        uri = urlsplit(oura_auth.redirect_uri(cfg))
+        return {
+            "st": oura_auth.status(cfg),
+            "configured": oura_auth.configured(cfg),
+            "redirect_uri": oura_auth.redirect_uri(cfg),
+            "scopes": oura_auth.scopes(cfg),
+            "on_localhost": request.host.split(":")[0] == "localhost" and request.remote_addr in LOOPBACK,
+            "port_ok": uri.port == port and uri.hostname == "localhost",
+            "gui_port": port,
+        }
+
+    def loopback_only():
+        """The GUI binds 0.0.0.0, so the OAuth and disconnect routes refuse anything that is not this machine."""
+        if request.remote_addr not in LOOPBACK:
+            return "This page only works from the machine running Mimir (http://localhost).", 403
+        return None
+
+    def oura_poll_now():
+        def run():
+            try:
+                oura_poller.run_cycle(cfg_now())
+            except Exception as e:
+                log_error(SCRIPT, type(e).__name__, "oura first poll", str(e))
+        threading.Thread(target=run, daemon=True).start()
+
+    @app.get("/setup/oura")
+    @guarded
+    def oura_setup():
+        return render_template("setup_oura.html", **oura_context())
+
+    @app.get("/oauth/oura/start")
+    @guarded
+    def oura_start():
+        blocked = loopback_only()
+        if blocked:
+            return blocked
+        c = oura_context()
+        if not c["configured"]:
+            flash("Set oura.client_id and oura.client_secret in config.yaml first.", "error")
+        elif not c["on_localhost"]:
+            flash("Open this page as http://localhost:%d on the computer running Mimir, then try again." % c["gui_port"], "error")
+        elif not c["port_ok"]:
+            flash("oura.redirect_uri does not match the running GUI port. It must be http://localhost:%d/oauth/oura/callback." % c["gui_port"], "error")
+        else:
+            return redirect(oura_auth.build_authorize_url(cfg_now(), oura_auth.new_state()))
+        return redirect(url_for("oura_setup"))
+
+    @app.get("/oauth/oura/callback")
+    @guarded
+    def oura_callback():
+        blocked = loopback_only()
+        if blocked:
+            return blocked
+        a = request.args
+        if not oura_auth.consume_state(a.get("state")):
+            flash("That authorization link is unknown, expired, or was already used. Start the connection again.", "error")
+        elif a.get("error") == "access_denied":
+            flash("You cancelled the connection at Oura. Nothing was changed. You can try again.", "error")
+        elif a.get("error"):
+            flash("Oura returned an error: %s" % (a.get("error_description") or a.get("error"))[:200], "error")
+        elif not a.get("code"):
+            flash("Oura did not send an authorization code. Start the connection again.", "error")
+        else:
+            try:
+                oura_auth.exchange_code(cfg_now(), a["code"])
+            except oura_auth.OAuthError as e:
+                flash(str(e), "error")
+            except oura_auth.TemporaryError:
+                flash("Could not reach Oura to finish connecting. Start the connection again in a minute.", "error")
+            else:
+                oura_poll_now()
+                flash("Oura is connected. The first data pull has started.", "ok")
+        return redirect(url_for("oura_setup"))
+
+    @app.post("/setup/oura/disconnect")
+    @guarded
+    def oura_disconnect():
+        blocked = loopback_only()
+        if blocked:
+            return blocked
+        if request.form.get("confirm") != "yes":
+            flash("Tick the confirmation box to disconnect.", "error")
+        else:
+            flash(oura_auth.revoke(cfg_now(), delete_data=request.form.get("delete_data") == "yes"), "ok")
+        return redirect(url_for("oura_setup"))
 
     return app
 

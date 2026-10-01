@@ -128,7 +128,7 @@ def run_install(cfg_path=None):
     example = os.path.join(ROOT, "config", "config.example.yaml")
     if not os.path.exists(cfg_path):
         shutil.copy(example, cfg_path); summary.append("created config/config.yaml from the example")
-        print("Fill in every required field: the five tokens, telegram.chat_id, and the mysql block.")
+        print("Fill in every required field: ical.feed_url, github.pat, anthropic.api_key, telegram.bot_token, telegram.chat_id, and the mysql block.")
     editor = os.environ.get("EDITOR") or (shutil.which("nano") and "nano") or "vi"
     while True:
         try:
@@ -182,6 +182,16 @@ def run_install(cfg_path=None):
     else:
         manual.append(f"sudo cp {unit_src} {unit_dst} && sudo systemctl daemon-reload && sudo systemctl enable --now mimir "
                       "(edit User and WorkingDirectory in the unit first)")
+    # 6b. oura OAuth client (personal access tokens no longer exist); tokens are obtained later at /setup/oura
+    if not (cfg.get("oura") or {}).get("client_id") or not (cfg.get("oura") or {}).get("client_secret"):
+        print("Oura needs an OAuth app (client id and secret). Register one at cloud.ouraring.com with redirect URI "
+              "http://localhost:5000/oauth/oura/callback, or press Enter to do it later.")
+        cid, secret = _ask("Oura client id"), _ask("Oura client secret")
+        if cid and secret:
+            save_config({"oura": {"client_id": cid, "client_secret": secret}}, cfg_path)
+            summary.append("saved the Oura client id and secret")
+    port = int((cfg.get("supervisor") or {}).get("gui_port", 5000))
+    manual.append(f"after starting Mimir, open http://localhost:{port}/setup/oura on this computer and click Connect Oura")
     # 7. telegram
     from core import notifier
     if notifier.send_message("Mimir installed successfully"):

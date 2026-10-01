@@ -50,5 +50,6 @@
 <h1>Course Setup</h1>
 <p>Mimir will read your iCal feed and detect your enrolled courses automatically.</p>
 <form method="post" action="{{ url_for('setup_fetch') }}"><button type="submit">Fetch Courses from iCal</button></form>
+<p class="muted">Also set up <a href="{{ url_for('oura_setup') }}">the Oura connection</a>.</p>
 {% endif %}
 {% endblock %}
