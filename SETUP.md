@@ -1,6 +1,6 @@
 # Mimir setup
 
-Mimir's GUI starts on port 5000 by default, with nothing to configure. The Oura redirect address is registered with that port, so do not change `supervisor.gui_port` unless you also register a new redirect address with Oura and update `oura.redirect_uri`. If another program already uses port 5000 (macOS AirPlay Receiver does), free it first, or the GUI cannot start. Always open the GUI as `http://localhost:5000` on the computer that runs Mimir.
+Mimir's GUI starts on port 5000 by default, with nothing to configure. The Oura redirect address is registered with that port, so do not change `supervisor.gui_port` unless you also register a new redirect address with Oura and update `oura.redirect_uri`. If another program already uses port 5000, the GUI cannot start, so check first (step 5). Always open the GUI as `http://localhost:5000` on the computer that runs Mimir.
 
 ## 1. Gather these first
 
@@ -66,9 +66,19 @@ The redirect URI must match character for character: scheme, host, port, and pat
 
 ## 5. Start Mimir
 
+First make sure nothing else is using port 5000. On Ubuntu this command should print nothing:
+
+```bash
+sudo ss -ltnp | grep ':5000'
+```
+
+If it prints a line, the last column names the program using the port (a Docker registry and other web apps commonly use 5000). Stop or reconfigure that program, then continue.
+
 ```bash
 scripts/startup.sh
 ```
+
+Once it is running, `sudo ss -ltnp | grep ':5000'` should show a `python` process, and `http://localhost:5000/setup/oura` should open.
 
 Check `logs/startup.log`, `logs/main.out`, `logs/poller.out`, and `logs/gui.out`. Stop with `scripts/shutdown.sh`.
 
