@@ -1,18 +1,26 @@
 # Mimir setup
 
-Mimir uses one fixed port, 5000. The Oura redirect address is registered with that port, so do not change `supervisor.gui_port` unless you also register a new redirect address with Oura and update `oura.redirect_uri`. Always open the GUI as `http://localhost:5000` on the computer that runs Mimir.
+Mimir's GUI starts on port 5000 by default, with nothing to configure. The Oura redirect address is registered with that port, so do not change `supervisor.gui_port` unless you also register a new redirect address with Oura and update `oura.redirect_uri`. If another program already uses port 5000 (macOS AirPlay Receiver does), free it first, or the GUI cannot start. Always open the GUI as `http://localhost:5000` on the computer that runs Mimir.
 
 ## 1. Gather these first
 
-| What | Where it comes from | Config key |
-|---|---|---|
-| iCal feed URL | Canvas, Calendar, Calendar Feed. It contains a secret, treat it like a password. | `ical.feed_url` |
-| GitHub token and username | GitHub, Settings, Developer settings, personal access token with repo scope | `github.pat`, `github.username` |
-| Oura client id and secret | Oura developer portal, after registering an app (step 4) | `oura.client_id`, `oura.client_secret` |
-| Anthropic API key | console.anthropic.com | `anthropic.api_key` |
-| Telegram bot token and chat id | Message @BotFather to make a bot, send it /start, then read getUpdates for the chat id | `telegram.bot_token`, `telegram.chat_id` |
-| MySQL database | Step 2 | `mysql.*` |
-| Optional | SMTP login for emails, DeepSeek key, AWS API url and token | `email.*`, `deepseek.*`, `aws.*` |
+Required:
+
+- **iCal feed URL**: in Canvas, open Calendar, then Calendar Feed. The link contains a secret, so treat it like a password. Config key: `ical.feed_url`.
+- **GitHub token and username**: GitHub, Settings, Developer settings, personal access token with repo scope. Config keys: `github.pat` and `github.username`.
+- **Anthropic API key**: from console.anthropic.com. Config key: `anthropic.api_key`.
+- **Telegram bot token and chat id**: message @BotFather to make a bot, send the bot /start, then read getUpdates for the chat id. Config keys: `telegram.bot_token` and `telegram.chat_id`.
+- **MySQL database**: made in step 2. Config keys: the `mysql` block.
+
+Needed for Oura (you get these in step 4):
+
+- **Oura client id and secret**. Config keys: `oura.client_id` and `oura.client_secret`.
+
+Optional:
+
+- SMTP login for the morning and evening emails (`email.*`).
+- DeepSeek key for page reading (`deepseek.*`).
+- AWS API url and token for the dashboard (`aws.*`).
 
 ## 2. MySQL
 
