@@ -21,7 +21,21 @@ github:
     Readings: reading
 
 oura:
-  # Oura personal access token
+  # OAuth client id from your app at cloud.ouraring.com (Oura retired personal access tokens in December 2025)
+  client_id: ""
+  # OAuth client secret. Never shared, logged, or sent anywhere except Oura's token endpoint.
+  client_secret: ""
+  # Must match the redirect URI registered with Oura exactly, including scheme, host, port and path.
+  # The port is supervisor.gui_port (default 5000). Open the GUI as http://localhost:5000 on the machine running Mimir.
+  redirect_uri: "http://localhost:5000/oauth/oura/callback"
+  # Permissions requested from Oura, space separated. "daily" covers daily sleep, daily readiness and sleep
+  # periods (HRV, resting heart rate). Add nothing Mimir does not read. Changing this means reconnecting at /setup/oura.
+  scopes: "daily"
+  # Oura endpoints. Only change these if Oura moves them.
+  authorize_url: "https://cloud.ouraring.com/oauth/authorize"
+  token_url: "https://api.ouraring.com/oauth/token"
+  revoke_url: "https://api.ouraring.com/oauth/revoke"
+  # Legacy fallback, only used before the first OAuth connection. Oura no longer issues these, so leave it empty.
   pat: ""
   # Four daily poll times, HH:MM, 24 hour local time
   poll_times:

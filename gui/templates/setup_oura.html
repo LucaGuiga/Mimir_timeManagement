@@ -1,0 +1,47 @@
+{% extends "base.html" %}{% block title %}Mimir · Oura{% endblock %}
+{% block content %}
+<h1>Oura connection</h1>
+
+{% if st.state == 'connected' %}
+<p><span class="pill green">connected</span> since {{ st.connected_at|dt }}. Permissions: {{ st.scopes|join(', ') or 'not reported' }}.</p>
+{% if st.needs_scopes %}<div class="flash flash-error">Mimir now asks for more permissions than you granted ({{ scopes|join(', ') }}). Reconnect to grant them.</div>{% endif %}
+{% elif st.state == 'revoked' %}
+<p><span class="pill red">disconnected</span> Oura access was revoked or expired. Reconnect to resume.{% if st.last_error %} <span class="muted">({{ st.last_error }})</span>{% endif %}</p>
+{% elif st.state == 'error' %}
+<p><span class="pill red">error</span> {{ st.last_error }}</p>
+{% else %}
+<p><span class="pill amber">not connected</span> Oura data is not being collected.</p>
+{% endif %}
+
+{% if not configured %}
+<div class="flash flash-error">Set <code>oura.client_id</code> and <code>oura.client_secret</code> in <code>config/config.yaml</code>, then restart Mimir.</div>
+{% endif %}
+{% if not port_ok %}
+<div class="flash flash-error">The GUI is running on port {{ gui_port }} but <code>oura.redirect_uri</code> is <code>{{ redirect_uri }}</code>. They must match the address registered with Oura exactly. Expected <code>http://localhost:{{ gui_port }}/oauth/oura/callback</code>.</div>
+{% endif %}
+{% if not on_localhost %}
+<div class="flash flash-error">Open this page as <code>http://localhost:{{ gui_port }}/setup/oura</code> on the computer that runs Mimir. Oura sends you back to localhost, so a LAN address or hostname will not work.</div>
+{% endif %}
+
+<div class="card">
+  <p>Mimir asks Oura for: <code>{{ scopes|join(' ') }}</code>. Tokens are stored only in this computer's MySQL database.</p>
+  <p class="muted">Redirect address registered with Oura: <code>{{ redirect_uri }}</code></p>
+  {% if configured and on_localhost and port_ok %}
+  <p><a href="{{ url_for('oura_start') }}"><button type="button">{{ 'Reconnect' if st.state != 'not_connected' else 'Connect Oura' }}</button></a></p>
+  {% else %}
+  <p><button type="button" disabled>{{ 'Reconnect' if st.state != 'not_connected' else 'Connect Oura' }}</button></p>
+  {% endif %}
+</div>
+
+{% if st.state != 'not_connected' %}
+<div class="card">
+  <h2>Disconnect</h2>
+  <form method="post" action="{{ url_for('oura_disconnect') }}" data-confirm="Disconnect Oura?">
+    <p>Revokes Mimir's access at Oura and deletes the stored tokens.</p>
+    <p><label><input type="checkbox" name="confirm" value="yes"> I want to disconnect Oura</label></p>
+    <p><label><input type="checkbox" name="delete_data" value="yes"> Also delete all stored Oura data (daily and intraday readings). Off by default.</label></p>
+    <button>Disconnect</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

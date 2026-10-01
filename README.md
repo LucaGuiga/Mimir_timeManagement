@@ -27,7 +27,7 @@ Mimir is a locally hosted academic management platform. It reads your Canvas iCa
    ```bash
    cp config/config.example.yaml config/config.yaml
    ```
-   Every key has a comment above it. The tokens (`ical.feed_url`, `github.pat`, `oura.pat`, `anthropic.api_key`, `telegram.bot_token`), `telegram.chat_id`, and the whole `mysql` block are required. `aws.api_url` and `aws.api_token` point at the AWS app below. `config/config.yaml` is gitignored. There is no Canvas API integration; courses and assignments come only from the iCal feed. After first start, open `/setup` in the GUI to pick your courses and create their repos.
+   Every key has a comment above it. The tokens (`ical.feed_url`, `github.pat`, `anthropic.api_key`, `telegram.bot_token`), `telegram.chat_id`, and the whole `mysql` block are required. `aws.api_url` and `aws.api_token` point at the AWS app below. `config/config.yaml` is gitignored. There is no Canvas API integration; courses and assignments come only from the iCal feed. After first start, open `/setup` in the GUI to pick your courses and create their repos.
 4. Apply the schema and check connectivity:
    ```bash
    python -m db.db --init
@@ -44,6 +44,16 @@ Mimir is a locally hosted academic management platform. It reads your Canvas iCa
 Optional scraper: set `scraper.enabled: true`, run `playwright install chromium`, then `python pollers/canvas_scraper.py --login` (approve the Duo push). To let DeepSeek read pages when the built-in selectors find nothing, also set `deepseek.enabled`, `deepseek.api_key`, and fill `privacy.identity` (your name, emails, student id, usernames). DeepSeek stays off while `privacy.identity` is empty. Check the swap works with `python tests/scrape_identity_check.py`.
 
 The schema and migrations run on MariaDB 10.6+ and MySQL 8 (the MariaDB-only `IF NOT EXISTS` clauses are rewritten automatically).
+
+### Oura
+
+Mimir reads Oura through OAuth2, not a personal access token (Oura retired those). The redirect address is served by the local GUI, so Oura tokens and health data stay on your machine. Tokens are stored in the local MySQL database (table `oura_auth`), never in `config.yaml`, never in logs, and never sent to the AWS app. One Oura account is supported.
+
+1. Register an app at cloud.ouraring.com with redirect URI `http://localhost:5000/oauth/oura/callback`, privacy policy `https://lucaguiga.com/privacy.html`, and terms `https://lucaguiga.com/terms.html`.
+2. Put the client id and secret in `config/config.yaml` under `oura`.
+3. Start Mimir, then open `http://localhost:5000/setup/oura` in a browser on the same computer and click Connect Oura.
+
+The GUI must run on port 5000 and be opened as `localhost`, because the redirect address has to match what is registered exactly. Full steps are in [SETUP.md](SETUP.md).
 
 The GUI listens on `supervisor.gui_host:gui_port` (default `0.0.0.0:5000`).
 
