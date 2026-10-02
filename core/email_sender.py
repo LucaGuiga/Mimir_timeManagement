@@ -4,7 +4,7 @@ import smtplib
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 
-from core import progress, stress
+from core import deepseek_usage, progress, stress
 from core.config import get, load_config
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import errors_for_date, log_error
@@ -134,6 +134,7 @@ def send_morning(cfg=None):
                    "JOIN professor_profiles p ON p.id = h.professor_id WHERE h.day_of_week = %s ORDER BY p.professor_name, h.hour_start",
                    (today.weekday(),))
     parts.append(_section("Hot zones today (informational)", [f"{h['professor_name']}: {h['hour_start']:02d}:00-{h['hour_end']:02d}:00 ({h['source']})" for h in hz]))
+    parts.append(_section("DeepSeek usage (billing period)", deepseek_usage.email_rows(cfg)))
     return _send(cfg, f"Mimir morning {today.isoformat()}", parts)
 
 
@@ -182,6 +183,7 @@ def send_evening(cfg=None):
                         "ORDER BY ac.detected_at")
     parts.append(_section("Assignment changes", [f"{c['canvas_course_name']}: {c['title']} {c['field_changed']} "
                                                  f"{c['old_value']} -> {c['new_value']}" for c in changes]))
+    parts.append(_section("DeepSeek usage (billing period)", deepseek_usage.email_rows(cfg)))
     errors = [e for e in errors_for_date(today) if not e["acknowledged"]]
     if errors:
         parts.append(_section("Errors today (unacknowledged)", [f"[{e['severity']}] {e['script_name']} {e['operation']}: {(e['raw_message'] or '')[:160]}" for e in errors]))

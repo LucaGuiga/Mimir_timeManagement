@@ -27,7 +27,7 @@ Mimir is a locally hosted academic management platform. It reads your Canvas iCa
    ```bash
    cp config/config.example.yaml config/config.yaml
    ```
-   Every key has a comment above it. The tokens (`ical.feed_url`, `github.pat`, `anthropic.api_key`, `telegram.bot_token`), `telegram.chat_id`, and the whole `mysql` block are required. `aws.api_url` and `aws.api_token` point at the AWS app below. `config/config.yaml` is gitignored. There is no Canvas API integration; courses and assignments come only from the iCal feed. After first start, open `/setup` in the GUI to pick your courses and create their repos.
+   Every key has a comment above it. The tokens (`ical.feed_url`, `github.pat`, `telegram.bot_token`), `telegram.chat_id`, and the whole `mysql` block are required. `aws.api_url` and `aws.api_token` point at the AWS app below. `config/config.yaml` is gitignored. There is no Canvas API integration; courses and assignments come only from the iCal feed. After first start, open `/setup` in the GUI to pick your courses and create their repos.
 4. Apply the schema and check connectivity:
    ```bash
    python -m db.db --init

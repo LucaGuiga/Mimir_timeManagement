@@ -6,6 +6,7 @@ from datetime import datetime
 
 import requests
 
+from core import deepseek_usage
 from core.config import get
 from logs.error_handler import log_error
 
@@ -104,13 +105,13 @@ One item per announcement.""",
 }
 
 
-def _call(cfg, system, user):
+def _call(cfg, system, user, kind="other"):
     url = (get(cfg, "deepseek.base_url", "https://api.deepseek.com") or "").rstrip("/") + "/chat/completions"
     try:
         r = _post(url, cfg, system, user)
     except requests.RequestException as e:
         raise LLMParseError(f"deepseek request failed: {type(e).__name__}") from e
-    return _decode(r)
+    return _decode(r, cfg, kind)
 
 
 def _post(url, cfg, system, user):
@@ -120,11 +121,13 @@ def _post(url, cfg, system, user):
                             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
 
 
-def _decode(r):
+def _decode(r, cfg=None, kind="other"):
     if r.status_code >= 400:
         raise LLMParseError(f"deepseek http {r.status_code}: {r.text[:200]}")
     try:
-        return json.loads(r.json()["choices"][0]["message"]["content"])
+        body = r.json()
+        deepseek_usage.record(cfg or {}, kind, body.get("usage"))      # tokens are billed even when the answer is unusable
+        return json.loads(body["choices"][0]["message"]["content"])
     except (KeyError, ValueError, IndexError) as e:
         raise LLMParseError(f"deepseek returned unusable output: {e}") from e
 
@@ -176,5 +179,5 @@ def parse_page(cfg, kind, page_text):
     if not identity_pairs(cfg):
         raise LLMParseError("privacy.identity is empty; refusing to send page text to DeepSeek")
     system = PROMPTS[kind].replace("{year}", str(datetime.now().year))
-    data = restore(_call(cfg, system, text), cfg)
+    data = restore(_call(cfg, system, text, kind), cfg)
     return validate_assignments(data) if kind == "assignments" else validate_announcements(data)

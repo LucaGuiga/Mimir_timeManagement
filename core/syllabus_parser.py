@@ -195,6 +195,9 @@ def parse(cfg, course_id, raw_text):
         course = _course(course_id)
         quarter = get(cfg, "quarter_label", "") or None
         model = get(cfg, "anthropic.parse_model", "claude-sonnet-5")
+        if not get(cfg, "anthropic.api_key"):
+            result["message"] = "syllabus parsing needs anthropic.api_key in config.yaml; everything else works without it"
+            return result
         if not raw_text or not raw_text.strip():
             result["message"] = "syllabus text is empty"
             return result
