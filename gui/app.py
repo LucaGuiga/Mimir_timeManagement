@@ -272,7 +272,7 @@ def create_app(cfg=None):
     def syllabus():
         cfg = cfg_now()
         quarter = get(cfg, "quarter_label", "") or None
-        budgets = get(cfg, "anthropic.per_class_claude_budget_usd", {}) or {}
+        budgets = get(cfg, "deepseek.per_class_budget_usd", {}) or {}
         rows = fetch_all("SELECT * FROM courses WHERE active = TRUE ORDER BY canvas_course_name")
         for c in rows:
             c["parsed"] = fetch_one("SELECT * FROM syllabus_parsed WHERE course_id = %s AND quarter <=> %s ORDER BY id DESC LIMIT 1", (c["id"], quarter))
@@ -286,7 +286,7 @@ def create_app(cfg=None):
                 names = {a["id"]: a["title"] for a in c["assignments"]}
                 for it in c["parsed_items"] or []:
                     it["matched_title"] = names.get(it.get("matched_assignment_id"))
-        return render_template("syllabus_trigger.html", courses=rows, quarter=quarter, model=get(cfg, "anthropic.parse_model"))
+        return render_template("syllabus_trigger.html", courses=rows, quarter=quarter, model=get(cfg, "deepseek.model", "deepseek-chat"))
 
     @app.post("/syllabus/<int:course_id>/parse")
     @guarded

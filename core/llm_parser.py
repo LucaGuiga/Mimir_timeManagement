@@ -6,6 +6,7 @@ from datetime import datetime
 
 import requests
 
+from core import deepseek_usage
 from core.config import get
 from logs.error_handler import log_error
 
@@ -104,27 +105,35 @@ One item per announcement.""",
 }
 
 
-def _call(cfg, system, user):
+def _call(cfg, system, user, kind="other", max_tokens=None, usage_out=None):
     url = (get(cfg, "deepseek.base_url", "https://api.deepseek.com") or "").rstrip("/") + "/chat/completions"
     try:
-        r = _post(url, cfg, system, user)
+        r = _post(url, cfg, system, user, max_tokens)
     except requests.RequestException as e:
         raise LLMParseError(f"deepseek request failed: {type(e).__name__}") from e
-    return _decode(r)
+    return _decode(r, cfg, kind, usage_out)
 
 
-def _post(url, cfg, system, user):
-    return requests.post(url, timeout=TIMEOUT, headers={"Authorization": f"Bearer {get(cfg, 'deepseek.api_key')}"},
-                      json={"model": get(cfg, "deepseek.model", "deepseek-chat"), "temperature": 0,
-                            "response_format": {"type": "json_object"},
-                            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
+def _post(url, cfg, system, user, max_tokens=None):
+    body = {"model": get(cfg, "deepseek.model", "deepseek-chat"), "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+    if max_tokens:
+        body["max_tokens"] = int(max_tokens)
+    return requests.post(url, timeout=TIMEOUT, headers={"Authorization": f"Bearer {get(cfg, 'deepseek.api_key')}"}, json=body)
 
 
-def _decode(r):
+def _decode(r, cfg=None, kind="other", usage_out=None):
     if r.status_code >= 400:
         raise LLMParseError(f"deepseek http {r.status_code}: {r.text[:200]}")
     try:
-        return json.loads(r.json()["choices"][0]["message"]["content"])
+        body = r.json()
+        usage = body.get("usage")
+        deepseek_usage.record(cfg or {}, kind, usage)      # tokens are billed even when the answer is unusable
+        if usage_out is not None and isinstance(usage, dict):
+            usage_out["cost"] = deepseek_usage.cost(cfg or {}, int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0),
+                                                    int(usage.get("prompt_cache_hit_tokens") or 0))
+        return json.loads(body["choices"][0]["message"]["content"])
     except (KeyError, ValueError, IndexError) as e:
         raise LLMParseError(f"deepseek returned unusable output: {e}") from e
 
@@ -176,5 +185,17 @@ def parse_page(cfg, kind, page_text):
     if not identity_pairs(cfg):
         raise LLMParseError("privacy.identity is empty; refusing to send page text to DeepSeek")
     system = PROMPTS[kind].replace("{year}", str(datetime.now().year))
-    data = restore(_call(cfg, system, text), cfg)
+    data = restore(_call(cfg, system, text, kind), cfg)
     return validate_assignments(data) if kind == "assignments" else validate_announcements(data)
+
+
+def json_call(cfg, kind, system, text, max_tokens=None, max_chars=MAX_CHARS):
+    """Swap identity, ask DeepSeek for one JSON object, swap identity back. Returns (data, cost_usd).
+    Raises LLMParseError, including when text is too long (never silently truncated) or privacy.identity is empty."""
+    if not identity_pairs(cfg):
+        raise LLMParseError("privacy.identity is empty; refusing to send text to DeepSeek")
+    if len(text) > max_chars:
+        raise LLMParseError(f"text is {len(text)} characters, above the {max_chars} limit; trim it first")
+    usage = {}
+    data = restore(_call(cfg, system, anonymize(text, cfg), kind, max_tokens, usage), cfg)
+    return data, usage.get("cost", 0.0)

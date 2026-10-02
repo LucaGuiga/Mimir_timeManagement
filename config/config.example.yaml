@@ -50,14 +50,6 @@ oura:
   # Percentage below baseline readiness that triggers a Telegram stress alert
   stress_alert_threshold_pct: 15
 
-anthropic:
-  # Anthropic API key, used only by the GUI for on demand syllabus parsing
-  api_key: ""
-  # Model used for syllabus parsing
-  parse_model: "claude-sonnet-5"
-  # Optional per class spending cap in USD, keyed by canvas_course_name
-  per_class_claude_budget_usd: {}
-
 telegram:
   # Telegram bot token from @BotFather
   bot_token: ""
@@ -196,6 +188,24 @@ deepseek:
   api_key: ""
   base_url: "https://api.deepseek.com"
   model: "deepseek-chat"
+  # Spend tracking. Mimir records the tokens of every DeepSeek call and warns on Telegram once per billing period when the
+  # estimated spend has reached the limit or the current pace will reach it before the period ends.
+  monthly_cap_usd: 10
+  # Day of the month your DeepSeek billing period starts (1 to 28). Totals in the emails cover this period.
+  billing_day: 1
+  # Dollars per million tokens, used to estimate cost. These are placeholders: check platform.deepseek.com/pricing and update them.
+  price_input_per_m: 0.28
+  price_cache_hit_per_m: 0.028
+  price_output_per_m: 0.42
+  # Optional spending cap per class for syllabus parsing in USD, keyed by course name, for example {"ECE-141-01": 0.50}
+  per_class_budget_usd: {}
+
+syllabus:
+  # With the Canvas scraper on, find each course's syllabus (the syllabus page, the home page, and syllabus PDFs) and
+  # parse it with DeepSeek into JSON. Needs deepseek.enabled and privacy.identity.
+  auto_fetch: true
+  # Hours between checks of each course for a new syllabus. Parsing only happens when the text changed.
+  recheck_hours: 24
 
 privacy:
   # Swapped for a fake "John Doe" identity before any page text is sent to DeepSeek, and swapped back on the way in.

@@ -128,7 +128,7 @@ def run_install(cfg_path=None):
     example = os.path.join(ROOT, "config", "config.example.yaml")
     if not os.path.exists(cfg_path):
         shutil.copy(example, cfg_path); summary.append("created config/config.yaml from the example")
-        print("Fill in every required field: ical.feed_url, github.pat, anthropic.api_key, telegram.bot_token, telegram.chat_id, and the mysql block.")
+        print("Fill in every required field: ical.feed_url, github.pat, telegram.bot_token, telegram.chat_id, and the mysql block.")
     editor = os.environ.get("EDITOR") or (shutil.which("nano") and "nano") or "vi"
     while True:
         try:
