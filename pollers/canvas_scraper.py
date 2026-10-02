@@ -10,7 +10,9 @@ from datetime import datetime
 
 import hashlib
 
-from core import llm_parser, notifier
+from urllib.parse import urlsplit
+
+from core import llm_parser, notifier, syllabus_parser
 from core.config import get, load_config, repo_root
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
@@ -302,6 +304,104 @@ def scrape_assignments(page, course, cfg=None):
     return updated
 
 
+SYLLABUS_HINT = re.compile(r"syllabus", re.I)
+MAX_PDF_BYTES = 15 * 1024 * 1024
+MAX_PDFS = 3
+MIN_PAGE_CHARS = 300           # below this a syllabus page is treated as empty and the course home page is used too
+
+
+def _check_age_hours(key):
+    row = fetch_one("SELECT TIMESTAMPDIFF(HOUR, updated_at, NOW()) AS h FROM scrape_cache WHERE page_key = %s", (key,))
+    return None if not row else row["h"]
+
+
+def _visible_text(page, selector):
+    loc = page.locator(selector)
+    return loc.first.inner_text().strip() if loc.count() else ""
+
+
+def _syllabus_file_links(page):
+    """(file_id, name) for same site file links on the current page whose text or address mentions the syllabus."""
+    host = urlsplit(BASE_URL).netloc
+    found = {}
+    pairs = page.eval_on_selector_all("a[href*='/files/'], a[href$='.pdf']",
+                                      "els => els.map(e => [e.getAttribute('href') || '', (e.innerText || e.getAttribute('title') || '').trim()])")
+    for href, text in pairs:
+        parts = urlsplit(href)
+        if parts.netloc and parts.netloc != host:
+            continue                                   # never send the Canvas login cookies to another site
+        m = re.search(r"/files/(\d+)", parts.path)
+        if m and (SYLLABUS_HINT.search(text) or SYLLABUS_HINT.search(parts.path)):
+            found.setdefault(int(m.group(1)), text or f"file {m.group(1)}")
+    return list(found.items())
+
+
+def _download_pdf(page, course_id, file_id):
+    """Bytes of a PDF file using the logged in browser session, or None if it is not a PDF or too big."""
+    r = page.context.request.get(f"{BASE_URL}/courses/{course_id}/files/{file_id}/download?download_frd=1", timeout=NAV_TIMEOUT_MS)
+    if r.status != 200:
+        return None
+    body = r.body()
+    return body if body[:5] == b"%PDF-" and len(body) <= MAX_PDF_BYTES else None
+
+
+def _syllabus_sources(page, course):
+    """[(label, text)]: the course syllabus page text (HTML syllabi), the home page when that is empty, and any syllabus PDFs."""
+    cid = course["canvas_course_id"]
+    sources, files = [], {}
+
+    def visit(path):
+        _goto(page, path)
+        if _looks_like_login(page):
+            raise SessionExpiredError("Canvas session expired. Run: python pollers/canvas_scraper.py --login")
+        for fid, name in _syllabus_file_links(page):
+            files.setdefault(fid, name)
+
+    visit(f"/courses/{cid}/assignments/syllabus")
+    body = _visible_text(page, "#course_syllabus")
+    pages = [("Syllabus page", body)] if len(body) >= MIN_PAGE_CHARS else []
+    for path in (f"/courses/{cid}", f"/courses/{cid}/files", f"/courses/{cid}/modules"):
+        visit(path)
+        if not pages and path == f"/courses/{cid}":
+            home = _visible_text(page, "#content")
+            if SYLLABUS_HINT.search(home) and len(home) >= MIN_PAGE_CHARS:
+                pages = [("Course home page", home)]
+    for fid, name in list(files.items())[:MAX_PDFS]:
+        data = _download_pdf(page, cid, fid)
+        if data is None:
+            continue
+        text = syllabus_parser.pdf_text(data)
+        if text:
+            sources.append((f"File: {name}", text))
+        else:
+            log_error(SCRIPT, "ScannedPdf", f"syllabus course {course['id']}", f"'{name}' has no extractable text (scanned PDF); Mimir cannot read it without OCR")
+    return sources + pages
+
+
+def scrape_syllabus(page, course, cfg=None):
+    """Find this course's syllabus (page and/or PDFs), parse it with DeepSeek into the syllabus_parsed JSON, once per change.
+    Checks each course at most every syllabus.recheck_hours (default 24). Returns 1 when a new parse was stored."""
+    if cfg is None or not llm_parser.enabled(cfg) or not get(cfg, "syllabus.auto_fetch", True):
+        return 0
+    age = _check_age_hours(f"syllabus_check:{course['id']}")
+    if age is not None and age < int(get(cfg, "syllabus.recheck_hours", 24)):
+        return 0
+    sources = _syllabus_sources(page, course)
+    _mark_parsed(f"syllabus_check:{course['id']}", "checked")
+    if not sources:
+        return 0
+    text = "\n\n".join(f"=== {label} ===\n{body}" for label, body in sources)
+    key = f"syllabus:{course['id']}"
+    if not _page_changed(key, text):
+        return 0
+    result = syllabus_parser.parse(cfg, course["id"], text)
+    if result["status"] == "ok":
+        _mark_parsed(key, text)
+        return 1
+    log_error(SCRIPT, "SyllabusParse", f"course {course['id']}", f"{result['status']}: {result['message']}")
+    return 0
+
+
 def run_cycle(cfg):
     path = cookie_file(cfg)
     if not os.path.exists(path):
@@ -321,7 +421,7 @@ def run_cycle(cfg):
         courses = fetch_all("SELECT id, canvas_course_id, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE AND canvas_course_id > 0 ORDER BY id")
         try:
             for i, course in enumerate(courses):
-                for fn in (scrape_announcements, scrape_assignments):
+                for fn in (scrape_announcements, scrape_assignments, scrape_syllabus):
                     try:
                         fn(page, course, cfg)
                     except SessionExpiredError:

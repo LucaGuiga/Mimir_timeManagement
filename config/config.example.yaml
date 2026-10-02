@@ -50,14 +50,6 @@ oura:
   # Percentage below baseline readiness that triggers a Telegram stress alert
   stress_alert_threshold_pct: 15
 
-anthropic:
-  # Optional. Only used by the syllabus page to parse syllabi; leave empty to skip that feature.
-  api_key: ""
-  # Model used for syllabus parsing
-  parse_model: "claude-sonnet-5"
-  # Optional per class spending cap in USD, keyed by canvas_course_name
-  per_class_claude_budget_usd: {}
-
 telegram:
   # Telegram bot token from @BotFather
   bot_token: ""
@@ -205,6 +197,15 @@ deepseek:
   price_input_per_m: 0.28
   price_cache_hit_per_m: 0.028
   price_output_per_m: 0.42
+  # Optional spending cap per class for syllabus parsing in USD, keyed by course name, for example {"ECE-141-01": 0.50}
+  per_class_budget_usd: {}
+
+syllabus:
+  # With the Canvas scraper on, find each course's syllabus (the syllabus page, the home page, and syllabus PDFs) and
+  # parse it with DeepSeek into JSON. Needs deepseek.enabled and privacy.identity.
+  auto_fetch: true
+  # Hours between checks of each course for a new syllabus. Parsing only happens when the text changed.
+  recheck_hours: 24
 
 privacy:
   # Swapped for a fake "John Doe" identity before any page text is sent to DeepSeek, and swapped back on the way in.

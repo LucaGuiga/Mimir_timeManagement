@@ -132,7 +132,7 @@ def main():
                     course_ids += [int(m.group(1)) for h in hrefs for m in [re.search(r"^/courses/(\d+)(?:/|$)", h or "")] if m]
                 summary.append((label, *check_page(rep, label, text, cfg, needles, not args.no_dump)))
             for cid in dict.fromkeys(course_ids):
-                for kind in ("assignments", "announcements", "grades"):
+                for kind in ("assignments", "announcements", "grades", "assignments/syllabus"):
                     label = f"course {cid} {kind}"
                     try:
                         text = visit(page, f"/courses/{cid}/{kind}")

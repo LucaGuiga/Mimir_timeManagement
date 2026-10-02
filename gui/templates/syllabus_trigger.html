@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Mimir · Syllabus{% endblock %}
 {% block content %}
 <h1>Syllabus parsing</h1>
-<p class="muted">Quarter: {{ quarter or 'not set' }} · model: {{ model }}. Parsing calls the Anthropic API on demand and charges against the per class budget.</p>
+<p class="muted">Quarter: {{ quarter or 'not set' }} · model: {{ model }}. Syllabi found on your Canvas pages and in syllabus PDFs are parsed automatically (about once a day per course, only when they change). You can also upload or paste one here. Parsing uses DeepSeek and counts toward the DeepSeek spend limit.</p>
 {% for c in courses %}
 <div class="card">
   <h2>{{ c.canvas_course_name }}</h2>
@@ -12,7 +12,7 @@
     <tr><th>Last parse cost</th><td>{{ '$%.4f'|format(c.parsed.parse_cost_usd) if c.parsed and c.parsed.parse_cost_usd is not none else '–' }}</td></tr>
     <tr><th>Budget used</th><td>${{ '%.4f'|format(c.spent) }}{% if c.budget is not none %} of ${{ '%.2f'|format(c.budget) }}{% else %} (no budget set){% endif %}</td></tr>
   </table>
-  <form method="post" action="{{ url_for('syllabus_parse', course_id=c.id) }}" enctype="multipart/form-data" data-confirm="Send this syllabus to the Anthropic API?">
+  <form method="post" action="{{ url_for('syllabus_parse', course_id=c.id) }}" enctype="multipart/form-data" data-confirm="Send this syllabus to DeepSeek? Your name is swapped for a fake one first.">
     <p><label>Upload a syllabus (PDF, HTML, or text) <input type="file" name="file" accept=".pdf,.html,.htm,.txt,.md"></label></p>
     <p><label>or paste the text<br><textarea name="text" rows="4" cols="80"></textarea></label></p>
     <button>Parse</button>

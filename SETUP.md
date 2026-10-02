@@ -17,9 +17,8 @@ Needed for Oura (you get these in step 4):
 
 Optional:
 
-- Anthropic API key, only for syllabus parsing (`anthropic.api_key`). Mimir runs without it.
 - SMTP login for the morning and evening emails (`email.*`).
-- DeepSeek key for page reading (`deepseek.*`). Mimir tracks its token spend, warns on Telegram if a billing period is on track to pass `deepseek.monthly_cap_usd` (default $10), and shows the billing period total in both emails. Set `deepseek.billing_day` to the day your period starts and the `deepseek.price_*` keys to DeepSeek's current prices.
+- DeepSeek key for page reading and syllabus parsing (`deepseek.*`). Mimir tracks its token spend, warns on Telegram if a billing period is on track to pass `deepseek.monthly_cap_usd` (default $10), and shows the billing period total in both emails. Set `deepseek.billing_day` to the day your period starts and the `deepseek.price_*` keys to DeepSeek's current prices.
 - AWS API url and token for the dashboard (`aws.*`).
 
 ## 2. MySQL
@@ -156,6 +155,7 @@ Open `http://localhost:5000/setup`, then fetch, select, preview, and create. Do 
 ## 8. Optional pieces
 
 - **Canvas scraper:** set `scraper.enabled: true`, run `playwright install chromium`, then `python pollers/canvas_scraper.py --login` and approve the Duo push.
+- **Syllabi:** with the scraper and DeepSeek on, Mimir finds each course's syllabus on its Canvas pages and in syllabus PDFs and parses it into JSON about once a day, only when it changed. Scanned image PDFs are skipped because there is no text to read. You can also upload or paste a syllabus on the Syllabus page.
 - **DeepSeek page reading:** set `deepseek.enabled`, `deepseek.api_key`, and fill `privacy.identity`. Check the name swap with `python tests/scrape_identity_check.py` before relying on it.
 - **AWS dashboard:** see the README.
 - **Start at boot:** edit `scripts/mimir.service` for your user and paths, then follow the commands in its header.
