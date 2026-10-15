@@ -9,3 +9,4 @@ api/config.yaml
 venv/
 logs/*.out
 logs/scraper_error_*.png
+dist/

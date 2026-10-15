@@ -1,12 +1,12 @@
 """Snapshot push to the FastAPI app on AWS."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import requests
 
-from core import progress, stress
+from core import notifier, progress, stress
 from core.config import get, load_config
-from db.db import fetch_all, fetch_one
+from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
 
 SCRIPT = "aws_push"
@@ -93,4 +93,35 @@ def push_all(cfg=None):
         return True
     except Exception as e:
         log_error(SCRIPT, type(e).__name__, "push_all", str(e))
+        return False
+
+
+def _utc_naive(ts):
+    d = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    return d.astimezone(timezone.utc).replace(tzinfo=None) if d.tzinfo else d
+
+
+def pull_access_log(cfg=None):
+    """Copies new dashboard login attempts from AWS into dashboard_access_log and sends one Telegram message per new rate_limited entry."""
+    cfg = cfg or load_config()
+    if not get(cfg, "aws.enabled", True):
+        return False
+    url = (get(cfg, "aws.api_url") or "").rstrip("/")
+    if not url:
+        log_error(SCRIPT, "ConfigMissing", "pull_access_log", "aws.api_url not configured")
+        return False
+    try:
+        last = fetch_one("SELECT ts_raw FROM dashboard_access_log ORDER BY ts DESC LIMIT 1")
+        r = requests.get(f"{url}/access_log", params={"since": last["ts_raw"] if last else ""}, timeout=TIMEOUT,
+                         headers={"Authorization": f"Bearer {get(cfg, 'aws.api_token', '')}"})
+        if r.status_code >= 300:
+            raise RuntimeError(f"http {r.status_code}: {r.text[:200]}")
+        for e in r.json().get("entries", []):
+            new = execute_query("INSERT IGNORE INTO dashboard_access_log (ts, ts_raw, ip, outcome, label) VALUES (%s, %s, %s, %s, %s)",
+                                (_utc_naive(e["ts"]), e["ts"], e["ip"], e["outcome"], e.get("label")))
+            if new and e["outcome"] == "rate_limited":
+                notifier.send_warning(f"Dashboard login rate limited for {e['ip']} at {e['ts']}.")
+        return True
+    except Exception as e:
+        log_error(SCRIPT, type(e).__name__, "pull_access_log", str(e))
         return False

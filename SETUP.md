@@ -176,3 +176,17 @@ MIMIR_TEST_DB=mimir_test MIMIR_TEST_USER=root MIMIR_TEST_PASSWORD=... python -m 
 - **Oura says the redirect does not match:** compare the registered address with `oura.redirect_uri`, character by character.
 - **Telegram says Oura is disconnected:** open `/setup/oura` and click Reconnect.
 - **Machine was off for weeks:** the Oura refresh token may have expired. Reconnect.
+
+## Dashboard passwords
+
+The AWS dashboard is behind a password page. Each password has a label (1 to 64 characters of letters, digits, underscore, dot or dash), usually the person it belongs to. Only salted hashes are stored or sent; the password itself is never saved or logged.
+
+```bash
+python -m core.dashboard_passwords add friend       # prompts twice, no echo; replaces the password if the label exists
+python -m core.dashboard_passwords list             # labels and creation times only
+python -m core.dashboard_passwords remove friend    # revokes that password and ends its sessions
+```
+
+Each command pushes the full list to AWS, and Mimir pushes it again at startup. Removing the last label locks everyone out. `aws.enabled` and `aws.api_url` must be set, or the push is skipped and logged. Apply the new tables first with `python -m db.db --init`.
+
+Every login attempt (success, failure, rate limited) is copied from AWS into the local database about once a minute. The GUI page "Dashboard logins" (`/access-log`) shows the last 200, and a rate limited attempt also sends a Telegram message.

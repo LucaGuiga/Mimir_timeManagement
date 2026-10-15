@@ -164,6 +164,13 @@ def create_app(cfg=None):
         flash(f"Acknowledged {n} critical errors.", "ok")
         return redirect(url_for("errors"))
 
+    # ------------------------------------------------------- dashboard logins
+    @app.get("/access-log")
+    @guarded
+    def access_log():
+        rows = fetch_all("SELECT ts, ip, outcome, label FROM dashboard_access_log ORDER BY ts DESC, id DESC LIMIT 200")
+        return render_template("access_log.html", rows=rows)
+
     # ------------------------------------------------------------ hot zones
     @app.get("/hot_zones")
     @guarded

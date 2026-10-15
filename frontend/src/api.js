@@ -1,16 +1,31 @@
 import { createElement, useEffect, useState } from 'react';
-import { API_BASE, API_TOKEN } from './config.js';
+import { API_BASE } from './config.js';
 
 export async function apiGet(path) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
-    const r = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${API_TOKEN}` }, signal: ctrl.signal });
+    const r = await fetch(`${API_BASE}${path}`, { credentials: 'same-origin', signal: ctrl.signal });
+    if (r.status === 401) window.dispatchEvent(new Event('mimir-unauthorized'));   // App listens and shows the password page
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Login, logout and session check. These return the Response so the caller can read the status and body.
+export function apiPost(path, body) {
+  return fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export function apiSession() {
+  return fetch(`${API_BASE}/session`, { credentials: 'same-origin' });
 }
 
 // Polls an endpoint every `interval` ms. Returns {payload, updatedAt, stale, error}.

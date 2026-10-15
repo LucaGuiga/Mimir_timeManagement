@@ -8,7 +8,7 @@ Mimir is a locally hosted academic management platform. It reads your Canvas iCa
 2. `pollers/poller.py` polls the iCal feed and GitHub on their intervals and Oura four times a day. It writes only to MySQL.
 3. `core/main.py` reads MySQL and writes derived tables: stress scores, schedule changes, professor profiles, hot zones, no commit rows.
 4. `gui/app.py` is the Flask GUI on the local network for mapping courses, editing the schedule, presets, and on demand syllabus parsing.
-5. `core/aws_push.py` posts JSON snapshots to the AWS FastAPI app every minute; that app serves the dashboard from SQLite. AWS holds no MySQL.
+5. `core/aws_push.py` posts JSON snapshots to the AWS FastAPI app every minute; that app serves the dashboard from DynamoDB. AWS holds no MySQL.
 
 ## Local machine setup
 
@@ -59,22 +59,20 @@ The GUI listens on `supervisor.gui_host:gui_port` (default `0.0.0.0:5000`).
 
 ## AWS setup
 
-1. Copy the `api/` and `frontend/` directories to the box (for example under `/opt/mimir`).
-2. Install the API:
-   ```bash
-   python3 -m venv /opt/mimir/venv && /opt/mimir/venv/bin/pip install -r /opt/mimir/api/requirements.txt
-   cp /opt/mimir/api/config.example.yaml /opt/mimir/api/config.yaml
-   ```
-   Set `api_token` to the same value as `aws.api_token` in the local config. `api/config.yaml` is gitignored.
-3. Build the dashboard:
-   ```bash
-   cd /opt/mimir/frontend
-   cp src/config.example.js src/config.js   # set API_TOKEN; leave API_BASE empty when served by the API
-   npm install && npm run build
-   ```
-   The API serves `frontend/dist` at `/` once it exists.
-4. Install the unit: edit `User`, `Group`, `WorkingDirectory`, and the venv path in `api/mimir_api.service`, then follow the commands in its header comment. `GET /health` needs no token and reports the oldest snapshot time.
+The API and the dashboard run on AWS Lambda (python3.12) behind an API Gateway HTTP API at https://mimir.lucaguiga.com. Storage is the DynamoDB table `luca-mimir`. The Lambda runs the repo's own `api/fastapi_app.py` through Mangum, so there is no server to patch.
+
+1. Build the package: `api/build_lambda.sh`. It builds the dashboard and writes `dist/mimir-lambda.zip` including `frontend/dist`. Upload that zip to the Lambda.
+2. Set the Lambda environment variables:
+   - `MIMIR_API_TOKEN`: the machine token, equal to `aws.api_token` in `config/config.yaml`.
+   - `MIMIR_DYNAMO_TABLE`: `luca-mimir`.
+   - `MIMIR_SESSION_DAYS`: how long a dashboard login lasts.
+   - `MIMIR_LOGIN_MAX_FAILURES` and `MIMIR_LOGIN_WINDOW_MINUTES`: failed password attempts allowed per window before the login is rate limited.
+   - `MIMIR_FRONTEND_DIST`: where the built dashboard sits inside the package.
+3. Set `aws.api_url` to `https://mimir.lucaguiga.com` in `config/config.yaml`.
+4. Add a dashboard password: `python -m core.dashboard_passwords add <label>` (see SETUP.md).
+
+For development, `uvicorn api.fastapi_app:app` with SQLite still works locally.
 
 ### Token visibility
 
-The dashboard bundle contains `API_TOKEN`, so anyone who loads the page can read it and call the API. That is acceptable for a personal dashboard on an obscure subdomain. If that ever changes, put basic auth on the reverse proxy in front of uvicorn.
+The dashboard bundle no longer contains a secret. The dashboard sits behind a password page, and the API only answers dashboard requests that carry a session cookie from a successful login. The machine token lives only in `config/config.yaml` and the Lambda environment.
