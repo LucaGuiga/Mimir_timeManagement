@@ -9,3 +9,13 @@ port: 8000
 sqlite_path: "snapshots.sqlite"
 # Browser origins allowed to call the API (the dashboard is served from this same process, so usually empty)
 allowed_origins: []
+# Days a dashboard login stays valid
+session_days: 30
+# Wrong passwords from one IP before /login answers 429
+login_max_failures: 5
+# Minutes the failure count looks back (also how long a lockout lasts)
+login_window_minutes: 15
+# DynamoDB table for storage on Lambda; empty uses SQLite at sqlite_path
+dynamo_table: ""
+# Directory of the built dashboard; empty uses ../frontend/dist
+frontend_dist: ""

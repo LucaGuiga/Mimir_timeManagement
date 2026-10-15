@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Mimir · Dashboard logins{% endblock %}
+{% block content %}
+<h1>Dashboard logins</h1>
+<p class="muted">Last {{ rows|length }} attempts on the AWS dashboard password page, newest first. Times are UTC.</p>
+<table>
+  <tr><th>Time (UTC)</th><th>IP</th><th>Outcome</th><th>Label</th></tr>
+  {% for r in rows %}
+  <tr class="{{ 'sev-critical' if r.outcome == 'rate_limited' else ('sev-warning' if r.outcome == 'failure' else '') }}"><td>{{ r.ts.strftime('%a %b %d %H:%M:%S') }}</td><td>{{ r.ip }}</td><td>{{ r.outcome }}</td><td>{{ r.label or '' }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">No logins recorded yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

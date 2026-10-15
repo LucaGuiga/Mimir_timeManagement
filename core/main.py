@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from core import aws_push, email_sender, notifier, professor_profiler, progress, repo_manager, schedule_builder, stress
+from core import aws_push, dashboard_passwords, email_sender, notifier, professor_profiler, progress, repo_manager, schedule_builder, stress
 from core.config import ConfigError, get, load_config, repo_root, validate_config
 from core.supervisor import Supervisor
 from db.db import DBError, execute_query, fetch_all, fetch_one
@@ -99,6 +99,7 @@ def run():
     sched.add_job(_safe("evening email", email_sender.send_evening), _cron(get(cfg, "email.evening_time", "21:00")), id="email_pm")
     if get(cfg, "aws.enabled", True):
         sched.add_job(_safe("aws push", aws_push.push_all), IntervalTrigger(seconds=int(get(cfg, "aws.push_seconds", 60))), id="aws")
+        sched.add_job(_safe("aws access log", aws_push.pull_access_log), IntervalTrigger(seconds=int(get(cfg, "aws.push_seconds", 60))), id="aws_access_log")
     sched.add_job(_safe("heartbeat", _heartbeat), IntervalTrigger(seconds=60), id="heartbeat")
     sched.add_job(_safe("oura stress check", lambda: oura_stress_check(cfg)), IntervalTrigger(minutes=60), id="oura_stress_check")
     sched.add_job(_safe("repo manager", lambda: repo_manager.check_new_courses(cfg)), IntervalTrigger(seconds=60), id="repo_manager")
@@ -110,6 +111,7 @@ def run():
     signal.signal(signal.SIGTERM, _handle)
     signal.signal(signal.SIGINT, _handle)
     sched.start()
+    _safe("push dashboard passwords", dashboard_passwords.push_passwords)()
     _safe("stress at startup", lambda: stress.calculate_and_store(date.today()))()
     while not _stop.is_set():
         _stop.wait(1.0)

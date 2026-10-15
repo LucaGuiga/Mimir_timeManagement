@@ -39,3 +39,8 @@ table.kv { width:100%; border-collapse:collapse; font-size:.9rem; } .kv th { tex
 .day { flex:1; border-radius:2px; } .day.bar { background:var(--blue); } .day.bar.neg { background:var(--amber); } .day.hollow { height:8px; border:1px solid var(--grey); background:transparent; }
 .prog-total { color:var(--muted); white-space:nowrap; }
 @media (max-width: 800px) { .stats { grid-template-columns:1fr; } .prog-row { grid-template-columns:1fr; } .timeline { height:420px; } }
+.login { max-width:320px; margin:20vh auto 0; display:flex; flex-direction:column; gap:.6rem; }
+.login input { font:inherit; padding:.5rem .6rem; border:1px solid var(--line); border-radius:6px; }
+.login button { font:inherit; font-weight:600; padding:.5rem; border:0; border-radius:6px; background:var(--blue); color:#fff; cursor:pointer; } .login button:disabled { opacity:.5; cursor:default; }
+.login-error { color:#991b1b; font-size:.85rem; }
+.topbar { max-width:1200px; margin:0 auto; padding:.5rem 1rem 0; text-align:right; font-size:.8rem; } .topbar a { color:var(--muted); }
