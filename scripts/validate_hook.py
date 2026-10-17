@@ -13,6 +13,12 @@ def repo_root():
         return os.getcwd()
 
 
+def category_index(parts, folders):
+    """Index of the category folder (HW, Labs, ...) in a path, or None. It sits at the top of a per course repo and under
+    {term}/{COURSE}/ in the shared repo, so the first matching directory segment counts."""
+    return next((i for i, p in enumerate(parts[:-1]) if p.lower() in folders), None)
+
+
 def main(argv):
     root = repo_root()
     marker = os.path.join(root, ".mimir")
@@ -40,7 +46,7 @@ def main(argv):
     for path in argv:
         parts = path.replace("\\", "/").split("/")
         base = parts[-1]
-        if base.startswith(".") or len(parts) < 2 or parts[0].lower() not in folders:
+        if base.startswith(".") or category_index(parts, folders) is None:
             continue
         r = validate_filename(base, cfg, siblings=[s for s in siblings if s != base])
         errors += [f"  {path}: {e.split(': ', 1)[-1]}" for e in r["errors"]]

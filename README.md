@@ -27,7 +27,7 @@ Mimir is a locally hosted academic management platform. It reads your Canvas iCa
    ```bash
    cp config/config.example.yaml config/config.yaml
    ```
-   Every key has a comment above it. The tokens (`ical.feed_url`, `github.pat`, `telegram.bot_token`), `telegram.chat_id`, and the whole `mysql` block are required. `aws.api_url` and `aws.api_token` point at the AWS app below. `config/config.yaml` is gitignored. There is no Canvas API integration; courses and assignments come only from the iCal feed. After first start, open `/setup` in the GUI to pick your courses and create their repos.
+   Every key has a comment above it. The tokens (`ical.feed_url`, `github.pat`, `telegram.bot_token`), `telegram.chat_id`, and the whole `mysql` block are required. `aws.api_url` and `aws.api_token` point at the AWS app below. `config/config.yaml` is gitignored. There is no Canvas API integration; courses and assignments come only from the iCal feed. After first start, open `/setup` in the GUI to pick your courses and create their folders in the shared `coursework` repo (one folder per course, `Fall-2026/ECE129/HW/...`; see SETUP.md section 7).
 4. Apply the schema and check connectivity:
    ```bash
    python -m db.db --init
@@ -41,7 +41,7 @@ Mimir is a locally hosted academic management platform. It reads your Canvas iCa
    `logs/startup.log` records every start and stop with PIDs; `logs/main.out`, `logs/poller.out`, and `logs/gui.out` hold process output; `logs/fallback.log` catches errors that could not reach MySQL.
 6. Install the systemd unit so it starts at boot. Edit `User`, `WorkingDirectory`, and the two script paths in `scripts/mimir.service` first, then follow the commands in its header comment.
 
-Optional scraper: set `scraper.enabled: true`, run `playwright install chromium`, then `python pollers/canvas_scraper.py --login` (approve the Duo push). To let DeepSeek read pages when the built-in selectors find nothing, also set `deepseek.enabled`, `deepseek.api_key`, and fill `privacy.identity` (your name, emails, student id, usernames). DeepSeek stays off while `privacy.identity` is empty. Check the swap works with `python tests/scrape_identity_check.py`.
+Optional scraper: set `scraper.enabled: true`, run `playwright install chromium`, then `python -m pollers.canvas_scraper --login` (approve the Duo push). To let DeepSeek read pages when the built-in selectors find nothing, also set `deepseek.enabled`, `deepseek.api_key`, and fill `privacy.identity` (your name, emails, student id, usernames). DeepSeek stays off while `privacy.identity` is empty. Check the swap works with `python tests/scrape_identity_check.py`.
 
 The schema and migrations run on MariaDB 10.6+ and MySQL 8 (the MariaDB-only `IF NOT EXISTS` clauses are rewritten automatically).
 

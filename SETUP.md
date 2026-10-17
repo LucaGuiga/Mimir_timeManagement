@@ -152,9 +152,11 @@ Only this computer can start or finish the connection. Requests from other machi
 
 Open `http://localhost:5000/setup`, then fetch, select, preview, and create. Do this before the iCal poller has run for long, or it logs a warning for every event of an unselected course.
 
+By default all courses share one private repo, `repo_manager.shared_repo` (`coursework`), with a folder per course under the quarter: `coursework/Fall-2026/ECE129/HW/HW1/`. The repo is created with the first course. Work goes on `main`, inside the category folders; the GitHub poller tracks each course by its folder. To give one course its own repo (a group project, say), map it on the Courses page. Set `repo_manager.layout: "per_course"` for one repo per course instead.
+
 ## 8. Optional pieces
 
-- **Canvas scraper:** set `scraper.enabled: true`, run `playwright install chromium`, then `python pollers/canvas_scraper.py --login` and approve the Duo push.
+- **Canvas scraper:** set `scraper.enabled: true`, run `playwright install chromium`, then `python -m pollers.canvas_scraper --login` and approve the Duo push.
 - **Syllabi:** with the scraper and DeepSeek on, Mimir finds each course's syllabus on its Canvas pages and in syllabus PDFs and parses it into JSON about once a day, only when it changed. Scanned image PDFs are skipped because there is no text to read. You can also upload or paste a syllabus on the Syllabus page.
 - **DeepSeek page reading:** set `deepseek.enabled`, `deepseek.api_key`, and fill `privacy.identity`. Check the name swap with `python tests/scrape_identity_check.py` before relying on it.
 - **AWS dashboard:** see the README.

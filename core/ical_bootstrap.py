@@ -86,16 +86,9 @@ def fetch_and_parse(cfg):
 
 
 def repo_name_for(cfg, ical_course_code, is_lab=False):
-    """Same derivation create_course_repo uses (repo_manager.course_code), applied to the code without its section number.
-    A lab keeps its L so it does not collide with the lecture repo."""
-    parts = (ical_course_code or "").upper().split("-")
-    stem = "".join(parts[:-1] if len(parts) >= 3 else parts)
-    name = repo_manager.course_code(stem, cfg)
-    if not name:
-        return (ical_course_code or "").replace("-", "_")
-    if is_lab and not name.endswith("L"):
-        name += "L"
-    return name
+    """Course code without its section number: the per course repo name, and the course folder name in the shared repo.
+    A lab keeps its L so it does not collide with the lecture."""
+    return repo_manager.course_folder_name(cfg, {"ical_course_code": ical_course_code or "", "is_lab": is_lab})
 
 
 def _synthetic_id(cur, code):
@@ -151,14 +144,21 @@ def seed_courses(cfg, conn, selections):
 
 
 def preview_repos(cfg, seeded_courses):
+    """What /setup/create will make for each course. Shared layout: repo_name is the shared repo and path the course folder."""
     branches = list(get(cfg, "repo_manager.default_branches", ["main"]) or ["main"])
     folders = list(get(cfg, "repo_manager.default_folders", []) or [])
-    return [{
-        "course_id": c["id"],
-        "ical_course_code": c["ical_course_code"],
-        "repo_name": repo_name_for(cfg, c["ical_course_code"], c.get("is_lab")),
-        "is_lab": bool(c.get("is_lab")),
-        "branches": branches,
-        "folders": folders,
-        "lab_folder_note": "Lab sections tracked in Labs/ folder" if c.get("is_lab") else None,
-    } for c in seeded_courses]
+    shared = repo_manager.layout(cfg) == "shared"
+    out = []
+    for c in seeded_courses:
+        path = repo_manager.course_path(cfg, {"ical_course_code": c["ical_course_code"], "is_lab": c.get("is_lab")}) if shared else None
+        out.append({
+            "course_id": c["id"],
+            "ical_course_code": c["ical_course_code"],
+            "repo_name": repo_manager.shared_repo(cfg) if shared else repo_name_for(cfg, c["ical_course_code"], c.get("is_lab")),
+            "path": path,
+            "is_lab": bool(c.get("is_lab")),
+            "branches": branches,
+            "folders": [f"{path}/{f}" for f in folders] if path else folders,
+            "lab_folder_note": None if shared else ("Lab sections tracked in Labs/ folder" if c.get("is_lab") else None),
+        })
+    return out

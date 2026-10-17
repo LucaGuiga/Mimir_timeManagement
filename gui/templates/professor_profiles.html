@@ -9,6 +9,9 @@
   <p class="muted">{% for c in p.courses %}{{ c.canvas_course_name }}{{ ', ' if not loop.last }}{% else %}no courses{% endfor %}</p>
   <table class="kv">
     <tr><th>Syllabus adherence</th><td>{{ '%.0f%%'|format(p.syllabus_adherence_score * 100) if p.syllabus_adherence_score is not none else '–' }}</td></tr>
+    <tr><th>Assignments matched to the syllabus</th><td>{{ p.syllabus_matched_count }}</td></tr>
+    <tr><th>Due dates within a day of the syllabus</th><td>{{ '%.0f%%'|format(p.due_on_time_share * 100) if p.due_on_time_share is not none else '–' }}</td></tr>
+    <tr><th>Avg due date shift</th><td>{% if p.avg_due_shift_days is not none %}{{ '%.1f days %s'|format(p.avg_due_shift_days|abs, 'later' if p.avg_due_shift_days > 0 else 'earlier') if p.avg_due_shift_days|abs >= 0.05 else 'on the syllabus date' }}{% else %}–{% endif %}</td></tr>
     <tr><th>Avg early post</th><td>{{ '%.1f days'|format(p.avg_early_post_days) if p.avg_early_post_days is not none else '–' }}</td></tr>
     <tr><th>Avg late post</th><td>{{ '%.1f days'|format(p.avg_late_post_days) if p.avg_late_post_days is not none else '–' }}</td></tr>
     <tr><th>Typical days</th><td>{{ p.day_names|join(', ') or '–' }}</td></tr>

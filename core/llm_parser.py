@@ -133,7 +133,10 @@ def _decode(r, cfg=None, kind="other", usage_out=None):
         if usage_out is not None and isinstance(usage, dict):
             usage_out["cost"] = deepseek_usage.cost(cfg or {}, int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0),
                                                     int(usage.get("prompt_cache_hit_tokens") or 0))
-        return json.loads(body["choices"][0]["message"]["content"])
+        choice = body["choices"][0]
+        if choice.get("finish_reason") == "length":   # thinking plus answer ran into max_tokens; the JSON is cut off
+            raise LLMParseError(f"deepseek answer was cut off at max_tokens ({int((usage or {}).get('completion_tokens') or 0)} output tokens); raise the limit")
+        return json.loads(choice["message"]["content"])
     except (KeyError, ValueError, IndexError) as e:
         raise LLMParseError(f"deepseek returned unusable output: {e}") from e
 

@@ -164,12 +164,12 @@ def run_install(cfg_path=None):
         base = os.path.expanduser(_ask("Directory that holds (or will hold) your course repo clones", os.path.expanduser("~/courses")))
         os.makedirs(base, exist_ok=True)
         owner = cfg["github"].get("username")
-        for c in courses:
-            repo_dir = os.path.join(base, c["repo_name"])
+        for name in sorted({c["repo_name"] for c in courses}):   # the shared repo is cloned once for all its courses
+            repo_dir = os.path.join(base, name)
             if not os.path.isdir(repo_dir):
-                r = subprocess.run(["git", "clone", f"https://github.com/{owner}/{c['repo_name']}.git", repo_dir])
+                r = subprocess.run(["git", "clone", f"https://github.com/{owner}/{name}.git", repo_dir])
                 if r.returncode != 0:
-                    manual.append(f"clone {owner}/{c['repo_name']} into {repo_dir} and rerun the installer to add its hook"); continue
+                    manual.append(f"clone {owner}/{name} into {repo_dir} and rerun the installer to add its hook"); continue
             status = install_hook(repo_dir, cfg_path)
             summary.append(f"hook {status} in {repo_dir}")
     else:

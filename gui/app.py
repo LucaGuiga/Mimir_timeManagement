@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
 
-from core import email_sender, ical_bootstrap, oura_auth, repo_manager, schedule_builder, stress, syllabus_parser
+from core import email_sender, ical_bootstrap, oura_auth, planner, repo_manager, schedule_builder, stress, syllabus_parser, workload
 from core.config import ConfigError, get, load_config, reload_config, repo_root, save_config, validate_config
 from db.db import execute_query, fetch_all, fetch_one, get_connection
 from pollers import oura as oura_poller
@@ -20,6 +20,22 @@ SCRIPT = "gui"
 LOOPBACK = ("127.0.0.1", "::1")
 TYPES = ("hw", "quiz", "test", "lab", "project_milestone", "reading", "other")
 CATEGORIES = ("class", "travel", "clubs", "chores", "fixed", "flexible")
+# Settings the Presets page tunes with sliders: key -> (min, max, type). Saved into config.yaml under stress: and study:
+TUNABLE = {
+    "stress": {"difficulty_curve": (0.8, 4.0, float), "green_below": (0.1, 3.0, float), "amber_below": (0.1, 5.0, float),
+               "min_available_hours": (0.25, 6.0, float), "min_days_remaining": (0.05, 2.0, float), "recalc_minutes": (5, 120, int)},
+    "study": {"horizon_days": (1, 21, int), "day_start": ("05:00", "12:00", "time"), "latest_end": ("18:00", "23:45", "time"),
+              "hard_latest_end": ("20:00", "23:45", "time"), "min_block_minutes": (15, 120, int), "max_block_minutes": (30, 360, int),
+              "break_minutes": (0, 60, int), "max_hours_per_day": (1, 16, float)},
+}
+
+
+def _clamp(v, lo, hi, kind):
+    if kind == "time":
+        h, m = (int(x) for x in str(v).split(":")[:2])
+        hhmm = f"{h:02d}:{m:02d}"
+        return min(max(hhmm, lo), hi)
+    return kind(min(max(kind(float(v)), lo), hi))
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
@@ -76,8 +92,9 @@ def create_app(cfg=None):
 
     @app.context_processor
     def banner():
-        ctx = {"critical_count": 0, "latest_critical": None, "poller_status": [], "today": date.today(), "types": TYPES, "categories": CATEGORIES, "days": DAYS}
+        ctx = {"critical_count": 0, "latest_critical": None, "poller_status": [], "today": date.today(), "types": TYPES, "categories": CATEGORIES, "days": DAYS, "unread_messages": 0}
         try:
+            ctx["unread_messages"] = fetch_one("SELECT COUNT(*) AS n FROM telegram_inbox WHERE seen = FALSE")["n"]
             ctx["critical_count"] = unacknowledged_critical_count()
             if ctx["critical_count"]:
                 ctx["latest_critical"] = fetch_one("SELECT * FROM error_log WHERE severity='critical' AND acknowledged=FALSE ORDER BY timestamp DESC LIMIT 1")
@@ -164,6 +181,16 @@ def create_app(cfg=None):
         flash(f"Acknowledged {n} critical errors.", "ok")
         return redirect(url_for("errors"))
 
+    # ------------------------------------------------------------ messages
+    @app.get("/messages")
+    @guarded
+    def messages():
+        rows = fetch_all("SELECT * FROM telegram_inbox ORDER BY received_at DESC, id DESC LIMIT 200")
+        pending = fetch_all("SELECT created_at, level, text FROM notification_queue WHERE sent_at IS NULL ORDER BY id")
+        html = render_template("messages.html", rows=rows, pending=pending, wait=get(cfg_now(), "telegram.digest_minutes", 30))
+        execute_query("UPDATE telegram_inbox SET seen = TRUE WHERE seen = FALSE")
+        return html
+
     # ------------------------------------------------------- dashboard logins
     @app.get("/access-log")
     @guarded
@@ -206,7 +233,57 @@ def create_app(cfg=None):
     def schedule():
         d = _parse_date(request.args.get("date"))
         blocks = fetch_all("SELECT * FROM schedule_blocks WHERE date = %s ORDER BY start_time, id", (d,))
-        return render_template("schedule.html", d=d, blocks=blocks, prev=d - timedelta(days=1), next=d + timedelta(days=1))
+        meetings = fetch_all("SELECT m.*, c.ical_course_code, c.canvas_course_name FROM class_meetings m JOIN courses c ON c.id = m.course_id "
+                             "WHERE c.active = TRUE ORDER BY c.canvas_course_name, m.id")
+        edited = {m["course_id"] for m in meetings if m["source"] == "edited"}
+        for m in meetings:
+            m["in_use"] = m["source"] == "edited" or m["course_id"] not in edited
+        missing = fetch_all("SELECT ical_course_code, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE "
+                            "AND id NOT IN (SELECT course_id FROM class_meetings) ORDER BY canvas_course_name")
+        return render_template("schedule.html", d=d, blocks=blocks, prev=d - timedelta(days=1), next=d + timedelta(days=1),
+                               meetings=meetings, missing=missing, meeting_kinds=syllabus_parser.MEETING_KINDS, day_letters=syllabus_parser.DAY_LETTERS)
+
+    @app.post("/class-times/<int:meeting_id>")
+    @guarded
+    def class_time_save(meeting_id):
+        f = request.form
+        days = "".join(x for x in syllabus_parser.DAY_LETTERS if f.get(f"day_{x}"))
+        start, end = syllabus_parser._hhmm(f.get("start_time")), syllabus_parser._hhmm(f.get("end_time"))
+        if not days or not start or not end or end <= start:
+            flash("Class time not saved: pick at least one day and an end after the start.", "error")
+            return redirect(url_for("schedule", date=f.get("date")))
+        kind = f.get("kind") if f.get("kind") in syllabus_parser.MEETING_KINDS else "other"
+        row = fetch_one("SELECT course_id FROM class_meetings WHERE id = %s", (meeting_id,))
+        if not row:
+            raise ValueError("class time not found")
+        # editing one time of a course marks all of that course's times as edited, so a new syllabus parse keeps them together
+        execute_query("UPDATE class_meetings SET source = 'edited' WHERE course_id = %s", (row["course_id"],))
+        execute_query("UPDATE class_meetings SET kind=%s, days=%s, start_time=%s, end_time=%s, location=%s WHERE id=%s",
+                      (kind, days, start, end, (f.get("location") or "").strip()[:255] or None, meeting_id))
+        p = planner.plan(cfg_now())
+        flash(f"Class time saved; schedule rebuilt ({p['class']} class blocks).", "ok")
+        return redirect(url_for("schedule", date=f.get("date")))
+
+    @app.post("/class-times/<int:meeting_id>/delete")
+    @guarded
+    def class_time_delete(meeting_id):
+        row = fetch_one("SELECT course_id FROM class_meetings WHERE id = %s", (meeting_id,))
+        if row:
+            execute_query("UPDATE class_meetings SET source = 'edited' WHERE course_id = %s", (row["course_id"],))
+            execute_query("DELETE FROM class_meetings WHERE id = %s", (meeting_id,))
+            planner.plan_safely(cfg_now())
+        flash("Class time removed; schedule rebuilt.", "ok")
+        return redirect(url_for("schedule", date=request.form.get("date")))
+
+    @app.post("/class-times/course/<int:course_id>/use-syllabus")
+    @guarded
+    def class_time_reset(course_id):
+        """Drops the edits so the next syllabus parse (or a Parse now on the Syllabus page) fills the times again."""
+        execute_query("DELETE FROM class_meetings WHERE course_id = %s", (course_id,))
+        execute_query("DELETE FROM scrape_cache WHERE page_key IN (%s, %s)", (f"syllabus:{course_id}", f"syllabus_check:{course_id}"))
+        planner.plan_safely(cfg_now())
+        flash("Edits dropped; the syllabus will be read again on the next scraper run.", "ok")
+        return redirect(url_for("schedule", date=request.form.get("date")))
 
     def _back_to_schedule(block_id=None):
         d = request.form.get("date")
@@ -256,7 +333,39 @@ def create_app(cfg=None):
     @guarded
     def presets():
         cfg = cfg_now()
-        return render_template("presets.html", difficulty=get(cfg, "difficulty_presets", {}) or {}, tp=get(cfg, "time_presets", {}) or {})
+        p = workload.Presets(cfg)
+        classes = fetch_all("SELECT id, ical_course_code, canvas_course_name, hour_scale FROM courses WHERE active = TRUE AND monitor = TRUE ORDER BY canvas_course_name")
+        for c in classes:
+            c["difficulty"] = {t: int(p.difficulty(c["id"], t)) for t in TYPES}
+            c["scale_pct"] = round(p.scale(c["id"]) * 100)
+            c["default_pct"] = round(workload.default_scale(cfg, c) * 100)
+            c["customised"] = c["hour_scale"] is not None or any((c["id"], t) in p.difficulty_rows for t in TYPES)
+        return render_template("presets.html", difficulty=get(cfg, "difficulty_presets", {}) or {}, tp=get(cfg, "time_presets", {}) or {},
+                               classes=classes, curve=workload.curve(cfg), stress_cfg=get(cfg, "stress", {}) or {},
+                               study_cfg=get(cfg, "study", {}) or {}, tunable=TUNABLE,
+                               default_scale_pct=round(float(get(cfg, "stress.hour_scale_default", 1.0)) * 100))
+
+    @app.post("/presets/course/<int:course_id>")
+    @guarded
+    def presets_course_save(course_id):
+        f = request.form
+        for t in TYPES:
+            execute_query("REPLACE INTO course_presets (course_id, assignment_type, difficulty) VALUES (%s,%s,%s)",
+                          (course_id, t, max(1, min(5, int(f.get(f"d_{t}") or 2)))))
+        pct = max(1, min(100, int(float(f.get("scale_pct") or 100))))
+        execute_query("UPDATE courses SET hour_scale = %s WHERE id = %s", (pct / 100, course_id))
+        planner.plan_safely(cfg_now())   # study blocks follow the new estimates
+        flash("Class presets saved; study blocks rebuilt.", "ok")
+        return redirect(url_for("presets") + f"#class-{course_id}")
+
+    @app.post("/presets/course/<int:course_id>/reset")
+    @guarded
+    def presets_course_reset(course_id):
+        execute_query("DELETE FROM course_presets WHERE course_id = %s", (course_id,))
+        execute_query("UPDATE courses SET hour_scale = NULL WHERE id = %s", (course_id,))
+        planner.plan_safely(cfg_now())
+        flash("Class presets reset to the defaults; study blocks rebuilt.", "ok")
+        return redirect(url_for("presets") + f"#class-{course_id}")
 
     @app.post("/presets")
     @guarded
@@ -265,12 +374,18 @@ def create_app(cfg=None):
         update = {"_path": cfg.get("_path")}
         if f.get("form") == "difficulty":
             update["difficulty_presets"] = {t: max(1, min(5, int(f.get(f"d_{t}") or 2))) for t in TYPES}
+        elif f.get("form") in ("stress", "study"):
+            section = f.get("form")
+            update[section] = {k: _clamp(f.get(k), lo, hi, kind) for k, (lo, hi, kind) in TUNABLE[section].items() if f.get(k) is not None}
+            if section == "stress" and "hour_scale_default_pct" in f:
+                update["stress"]["hour_scale_default"] = max(1, min(100, int(float(f["hour_scale_default_pct"])))) / 100
         else:
             keys = ("sleep_target_hours", "commute_minutes", "breakfast_minutes", "lunch_minutes", "dinner_minutes", "chores_minutes", "alpha")
             update["time_presets"] = {k: float(f.get(k) or 0) if k in ("alpha", "sleep_target_hours") else int(float(f.get(k) or 0)) for k in keys}
         save_config(update)
         app.config["cfg"] = reload_config(cfg.get("_path"))
-        flash("Presets saved.", "ok")
+        planner.plan_safely(app.config["cfg"])
+        flash("Presets saved; study blocks rebuilt.", "ok")
         return redirect(url_for("presets"))
 
     # ------------------------------------------------------------- syllabus
@@ -336,9 +451,11 @@ def create_app(cfg=None):
     @app.post("/control/rebuild_schedule")
     @guarded
     def control_rebuild():
+        p = planner.plan(cfg_now())
         r = schedule_builder.run_for_today(date.today(), cfg_now())
-        flash(f"Schedule re evaluated: {len(r['moved'])} moved, {len(r['skipped'])} skipped, S={r['ratio']:.2f}.", "ok")
-        return redirect(url_for("index"))
+        flash(f"Schedule rebuilt: {p['class']} class and {p['study']} study blocks; {len(r['moved'])} moved, "
+              f"{len(r['skipped'])} skipped, S={r['ratio']:.2f}.", "ok")
+        return redirect(request.referrer or url_for("index"))
 
     @app.post("/control/restart_poller")
     @guarded
@@ -388,8 +505,11 @@ def create_app(cfg=None):
         for r in rows:
             r["branch_list"] = _jsonload(r["branches"], ["main"])
             r["repo_url"] = f"https://github.com/{owner}/{r['repo_name']}" if r["repo_name"] and owner else None
-            r["suggested"] = repo_manager.course_code(r["canvas_course_name"], cfg)
-        return render_template("repos.html", courses=rows, auto_create=bool(get(cfg, "repo_manager.auto_create", False)))
+            r["folder_url"] = f"{r['repo_url']}/tree/{r['branch_list'][0]}/{r['repo_path_prefix']}" if r["repo_url"] and r["repo_path_prefix"] else None
+            name, path = repo_manager.target(cfg, r)
+            r["suggested"] = f"{name}/{path}" if path else name
+        return render_template("repos.html", courses=rows, auto_create=bool(get(cfg, "repo_manager.auto_create", False)),
+                               shared=repo_manager.layout(cfg) == "shared", shared_repo=repo_manager.shared_repo(cfg))
 
     @app.post("/repos/<int:course_id>/create")
     @guarded
@@ -471,7 +591,8 @@ def create_app(cfg=None):
             execute_query("UPDATE courses SET setup_complete = TRUE WHERE id = %s", (cid,))
         session.pop("bootstrap_courses", None)
         session.pop("seeded_courses", None)
-        flash(f"Created {len(ok)} repos. {len(failed)} failed.", "ok" if not failed else "error")
+        what = f"Added {len(ok)} course folders to {repo_manager.shared_repo(cfg)}" if repo_manager.layout(cfg) == "shared" else f"Created {len(ok)} repos"
+        flash(f"{what}. {len(failed)} failed.", "ok" if not failed else "error")
         return redirect(url_for("setup", step="done"))
 
     # ------------------------------------------------------- oura oauth

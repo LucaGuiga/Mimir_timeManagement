@@ -14,7 +14,7 @@ SCRIPT = "github"
 TIMEOUT = 15
 API = "https://api.github.com"
 _etags = {}          # url -> (etag, cached json)
-_seen_shas = set()   # shas handled this process lifetime (covers commits with no matching files)
+_seen_shas = set()   # (course id, sha) handled this process lifetime (covers commits with no matching files)
 _backoff_until = None
 
 
@@ -159,8 +159,9 @@ def run_cycle(cfg):
     try:
         for course in courses:
             prefix = (course.get("repo_path_prefix") or "").strip("/")
+            # per course, not per repo: in the shared repo one commit can touch several course folders
             known = {r["commit_sha"] for r in fetch_all(
-                "SELECT DISTINCT commit_sha FROM github_commits WHERE repo_name=%s AND commit_sha IS NOT NULL", (course["repo_name"],))}
+                "SELECT DISTINCT commit_sha FROM github_commits WHERE course_id=%s AND commit_sha IS NOT NULL", (course["id"],))}
             for branch in _branches(course):
                 try:
                     params = {"sha": branch, "since": _since(course), "per_page": 50}
@@ -169,10 +170,10 @@ def run_cycle(cfg):
                     commits = _request(cfg, f"/repos/{owner}/{course['repo_name']}/commits", params)
                     for c in reversed(commits or []):
                         sha = c.get("sha")
-                        if not sha or sha in known or sha in _seen_shas:
+                        if not sha or sha in known or (course["id"], sha) in _seen_shas:
                             continue
                         _process_commit(cfg, owner, course, branch, prefix, sha)
-                        _seen_shas.add(sha)
+                        _seen_shas.add((course["id"], sha))
                 except (AuthFailure, _Backoff):
                     raise
                 except Exception as e:

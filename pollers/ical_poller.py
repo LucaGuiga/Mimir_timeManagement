@@ -120,6 +120,14 @@ def _fetch(cfg):
     return r.content
 
 
+def posted_at(comp, now):
+    """When Canvas last created or updated the event (its DTSTAMP), the best posting time the feed offers. Falls back to
+    now, and never later than now. The professor profiles read their posting days and hours from this."""
+    stamp = comp.get("DTSTAMP")
+    v = to_pacific(stamp.dt) if stamp is not None and isinstance(getattr(stamp, "dt", None), datetime) else None
+    return min(v, now) if v else now
+
+
 def _upsert_event(cfg, course, comp, now):
     uid = str(comp.get("UID") or "").strip()[:200] or None
     summary = str(comp.get("SUMMARY") or "").strip()
@@ -142,7 +150,7 @@ def _upsert_event(cfg, course, comp, now):
         aid = execute_query(
             "INSERT INTO assignments (course_id, canvas_assignment_id, title, assignment_type, assignment_number, due_at, status, "
             "canvas_posted_at, canvas_assignment_url, ical_uid, is_midterm, is_final) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (course["id"], canvas_id, title, atype, _number(title), due, status, now, url, uid, is_mid, is_fin))
+            (course["id"], canvas_id, title, atype, _number(title), due, status, posted_at(comp, now), url, uid, is_mid, is_fin))
     else:
         aid = row["id"]
         if due != row["due_at"] and due is not None:
@@ -204,8 +212,7 @@ def run_cycle(cfg):
                 log_error(SCRIPT, "NoCourseCode", "match course", f"no [CODE] suffix in SUMMARY: {summary[:120]}")
                 continue
             course = match_course(m.group(1).strip(), courses)
-            if course is None:
-                log_error(SCRIPT, "UnmatchedCourse", "match course", f"no course for [{m.group(1)}]; set ical_course_code on the Monitoring page")
+            if course is None:   # a course not selected in /setup is not tracked, so its events are skipped without a warning
                 continue
             if not course.get("monitor"):
                 continue

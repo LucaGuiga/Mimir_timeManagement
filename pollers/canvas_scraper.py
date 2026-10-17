@@ -1,5 +1,5 @@
 """Playwright scraper for Canvas announcements, submission status, grades, and available dates.
-Uses cookies saved by `python pollers/canvas_scraper.py --login` (headed, Duo Mobile completed by hand)."""
+Uses cookies saved by `python -m pollers.canvas_scraper --login` (headed, Duo Mobile completed by hand)."""
 import json
 import os
 import re
@@ -46,13 +46,17 @@ def _launch(playwright, headless=True):
     return playwright.chromium.launch(**kw)
 
 
+LOGIN_TITLE = re.compile(r"(?<![a-z])log ?in(?![a-z])", re.I)   # whole words only: "Analog Integrated Circuits" is not a login page
+
+
 def _looks_like_login(page):
     try:
         if page.locator("input[type=password], form[action*='login'], #login_form").count():
             return True
     except Exception:
         pass
-    return "log in" in (page.title() or "").lower() or "login" in page.url.lower()
+    parts = urlsplit(page.url)
+    return bool(LOGIN_TITLE.search(page.title() or "")) or "login" in parts.netloc.lower() or "/login" in parts.path.lower()
 
 
 def load_session(playwright, cookie_path=None):
@@ -69,7 +73,7 @@ def load_session(playwright, cookie_path=None):
         if "dashboard" in (page.title() or "").lower():
             return browser, page
         if _looks_like_login(page):
-            raise SessionExpiredError("Canvas session expired. Run: python pollers/canvas_scraper.py --login")
+            raise SessionExpiredError("Canvas session expired. Run: python -m pollers.canvas_scraper --login")
         return browser, page
     except Exception:
         browser.close()
@@ -180,7 +184,7 @@ def _mark_parsed(key, text):
 
 def _llm_page_text(page):
     if _looks_like_login(page):
-        raise SessionExpiredError("Canvas session expired. Run: python pollers/canvas_scraper.py --login")
+        raise SessionExpiredError("Canvas session expired. Run: python -m pollers.canvas_scraper --login")
     return page.inner_text("body")
 
 
@@ -305,9 +309,14 @@ def scrape_assignments(page, course, cfg=None):
 
 
 SYLLABUS_HINT = re.compile(r"syllabus", re.I)
+GDOC_RE = re.compile(r"docs\.google\.com/document/d/([A-Za-z0-9_-]{20,})")
+GDRIVE_RE = re.compile(r"drive\.google\.com/(?:file/d/|open\?id=|uc\?(?:[^\"' ]*&)?id=)([A-Za-z0-9_-]{20,})")
 MAX_PDF_BYTES = 15 * 1024 * 1024
-MAX_PDFS = 3
-MIN_PAGE_CHARS = 300           # below this a syllabus page is treated as empty and the course home page is used too
+MAX_PDFS = 3                   # most files (and Google documents) read per course
+MAX_SYLLABUS_PAGES = 3         # most "Syllabus" Pages / module items followed per course
+MIN_PAGE_CHARS = 300           # below this a page is treated as empty
+GOOGLE_TIMEOUT_S = 30
+UNBILLED_FAILURE = re.compile(r"deepseek http (402|429|5\d\d)|deepseek request failed|needs deepseek\.enabled")
 
 
 def _check_age_hours(key):
@@ -320,77 +329,175 @@ def _visible_text(page, selector):
     return loc.first.inner_text().strip() if loc.count() else ""
 
 
-def _syllabus_file_links(page):
-    """(file_id, name) for same site file links on the current page whose text or address mentions the syllabus."""
+def _links(page, scope="#content"):
+    """(href, text) for every link and embedded frame inside scope on the current page."""
+    return page.eval_on_selector_all(f"{scope} a[href], {scope} iframe[src]",
+                                     "els => els.map(e => [e.getAttribute('href') || e.getAttribute('src') || '', (e.innerText || e.getAttribute('title') || '').trim()])")
+
+
+def classify_links(pairs, canvas_course_id, any_google_doc=False):
+    """Sorts links into Canvas files, Canvas pages, Google Docs and Google Drive files that look like the syllabus.
+    A link counts when its text or address says syllabus. any_google_doc: the links sit on a syllabus page, so an
+    embedded or linked Google Doc counts even without the word (THEA80 embeds its syllabus document)."""
     host = urlsplit(BASE_URL).netloc
-    found = {}
-    pairs = page.eval_on_selector_all("a[href*='/files/'], a[href$='.pdf']",
-                                      "els => els.map(e => [e.getAttribute('href') || '', (e.innerText || e.getAttribute('title') || '').trim()])")
+    out = {"files": {}, "pages": {}, "gdocs": {}, "gdrive": {}}
     for href, text in pairs:
+        href = href or ""
+        text = " ".join((text or "").replace("Links to an external site.", "").split())   # Canvas adds that to external links
+        hinted = bool(SYLLABUS_HINT.search(text) or SYLLABUS_HINT.search(href))
+        m = GDOC_RE.search(href)
+        if m:
+            if hinted or any_google_doc:
+                out["gdocs"].setdefault(m.group(1), text or "Google Doc")
+            continue
+        m = GDRIVE_RE.search(href)
+        if m:
+            if hinted:
+                out["gdrive"].setdefault(m.group(1), text or "Google Drive file")
+            continue
         parts = urlsplit(href)
-        if parts.netloc and parts.netloc != host:
+        if not hinted or (parts.netloc and parts.netloc != host):
             continue                                   # never send the Canvas login cookies to another site
         m = re.search(r"/files/(\d+)", parts.path)
-        if m and (SYLLABUS_HINT.search(text) or SYLLABUS_HINT.search(parts.path)):
-            found.setdefault(int(m.group(1)), text or f"file {m.group(1)}")
-    return list(found.items())
+        if m:
+            out["files"].setdefault(int(m.group(1)), text or f"file {m.group(1)}")
+        elif re.match(rf"/courses/{canvas_course_id}/(pages/|modules/items/\d+)", parts.path):
+            out["pages"].setdefault(parts.path, text or parts.path)
+    return out
 
 
-def _download_pdf(page, course_id, file_id):
-    """Bytes of a PDF file using the logged in browser session, or None if it is not a PDF or too big."""
+def _download_file(page, course_id, file_id):
+    """Bytes of a PDF or Word file using the logged in browser session, or None if it is another type or too big."""
     r = page.context.request.get(f"{BASE_URL}/courses/{course_id}/files/{file_id}/download?download_frd=1", timeout=NAV_TIMEOUT_MS)
     if r.status != 200:
         return None
     body = r.body()
-    return body if body[:5] == b"%PDF-" and len(body) <= MAX_PDF_BYTES else None
+    return body if (body[:5] == b"%PDF-" or body[:2] == b"PK") and len(body) <= MAX_PDF_BYTES else None
+
+
+def _google_doc_text(doc_id):
+    """Plain text of a Google Doc shared by link. Fetched without any Canvas cookies. None when the doc is private."""
+    import requests
+    r = requests.get(f"https://docs.google.com/document/d/{doc_id}/export?format=txt", timeout=GOOGLE_TIMEOUT_S)
+    if r.status_code != 200 or "accounts.google.com" in r.url or "text/html" in r.headers.get("content-type", ""):
+        return None
+    return r.text.strip() or None
+
+
+def _google_drive_bytes(file_id):
+    """Bytes of a Google Drive file shared by link (PDF or Word). Fetched without any Canvas cookies."""
+    import requests
+    r = requests.get(f"https://drive.google.com/uc?export=download&id={file_id}", timeout=GOOGLE_TIMEOUT_S)
+    if r.status_code != 200 or "text/html" in r.headers.get("content-type", "") or len(r.content) > MAX_PDF_BYTES:
+        return None
+    return r.content
+
+
+def _document_text(course, name, data):
+    try:
+        text = syllabus_parser.extract_text(name if name.lower().endswith((".pdf", ".docx")) else "file", data)
+    except Exception as e:
+        log_error(SCRIPT, type(e).__name__, f"syllabus course {course['id']}", f"cannot read '{name}': {e}")
+        return None
+    if not text:
+        log_error(SCRIPT, "ScannedPdf", f"syllabus course {course['id']}", f"'{name}' has no extractable text (scanned PDF); Mimir cannot read it without OCR")
+    return text or None
 
 
 def _syllabus_sources(page, course):
-    """[(label, text)]: the course syllabus page text (HTML syllabi), the home page when that is empty, and any syllabus PDFs."""
+    """[(label, text)] for everything that looks like this course's syllabus, documents first:
+    syllabus files on Canvas (PDF, Word), Google Docs and Drive files linked or embedded, the syllabus page text, pages
+    named Syllabus (a Pages page or module item) and the course home page when the syllabus page has nothing.
+    Canvas sends the syllabus link to the home page when a course turned the syllabus tab off (ECE129 does), so that
+    text is labelled as the home page, and the syllabus file it links to is read too."""
     cid = course["canvas_course_id"]
-    sources, files = [], {}
+    found = {"files": {}, "pages": {}, "gdocs": {}, "gdrive": {}}
 
     def visit(path):
         _goto(page, path)
         if _looks_like_login(page):
-            raise SessionExpiredError("Canvas session expired. Run: python pollers/canvas_scraper.py --login")
-        for fid, name in _syllabus_file_links(page):
-            files.setdefault(fid, name)
+            raise SessionExpiredError("Canvas session expired. Run: python -m pollers.canvas_scraper --login")
 
+    def collect(any_google_doc=False):
+        for kind, items in classify_links(_links(page), cid, any_google_doc).items():
+            for k, v in items.items():
+                found[kind].setdefault(k, v)
+
+    texts = []
     visit(f"/courses/{cid}/assignments/syllabus")
-    body = _visible_text(page, "#course_syllabus")
-    pages = [("Syllabus page", body)] if len(body) >= MIN_PAGE_CHARS else []
+    on_syllabus = "/assignments/syllabus" in urlsplit(page.url).path
+    body = _visible_text(page, "#course_syllabus") if on_syllabus else ""
+    if len(body) >= MIN_PAGE_CHARS:
+        texts.append(("Syllabus page", body))
+    collect(any_google_doc=on_syllabus)
     for path in (f"/courses/{cid}", f"/courses/{cid}/files", f"/courses/{cid}/modules"):
         visit(path)
-        if not pages and path == f"/courses/{cid}":
+        if path == f"/courses/{cid}" and not texts:
             home = _visible_text(page, "#content")
             if SYLLABUS_HINT.search(home) and len(home) >= MIN_PAGE_CHARS:
-                pages = [("Course home page", home)]
-    for fid, name in list(files.items())[:MAX_PDFS]:
-        data = _download_pdf(page, cid, fid)
-        if data is None:
-            continue
-        text = syllabus_parser.pdf_text(data)
+                texts.append(("Course home page", home))
+        collect()
+    for path, name in list(found["pages"].items())[:MAX_SYLLABUS_PAGES]:
+        visit(path)
+        text = _visible_text(page, "#content")
+        if len(text) >= MIN_PAGE_CHARS:
+            texts.append((f"Page: {name}", text))
+        collect(any_google_doc=True)
+
+    docs = []
+    for fid, name in list(found["files"].items())[:MAX_PDFS]:
+        data = _download_file(page, cid, fid)
+        text = _document_text(course, name, data) if data else None
         if text:
-            sources.append((f"File: {name}", text))
+            docs.append((f"File: {name}", text))
+    for doc_id, name in list(found["gdocs"].items())[:MAX_PDFS]:
+        text = _google_doc_text(doc_id)
+        if text:
+            docs.append((f"Google Doc: {name}", text))
         else:
-            log_error(SCRIPT, "ScannedPdf", f"syllabus course {course['id']}", f"'{name}' has no extractable text (scanned PDF); Mimir cannot read it without OCR")
-    return sources + pages
+            log_error(SCRIPT, "GoogleDocPrivate", f"syllabus course {course['id']}", f"'{name}' is not shared by link, Mimir cannot read it")
+    for file_id, name in list(found["gdrive"].items())[:MAX_PDFS]:
+        data = _google_drive_bytes(file_id)
+        text = _document_text(course, name, data) if data else None
+        if text:
+            docs.append((f"Google Drive: {name}", text))
+    return docs + texts
+
+
+def _combine(course, sources, limit):
+    """Joins sources in order, dropping any that would push the text past the parser's limit (logged)."""
+    parts, used = [], 0
+    for label, body in sources:
+        chunk = f"=== {label} ===\n{body}"
+        if used + len(chunk) + 2 > limit:
+            log_error(SCRIPT, "SyllabusTooLong", f"syllabus course {course['id']}", f"left out '{label}' ({len(body)} characters) to stay under {limit}")
+            continue
+        parts.append(chunk)
+        used += len(chunk) + 2
+    return "\n\n".join(parts)
 
 
 def scrape_syllabus(page, course, cfg=None):
-    """Find this course's syllabus (page and/or PDFs), parse it with DeepSeek into the syllabus_parsed JSON, once per change.
-    Checks each course at most every syllabus.recheck_hours (default 24). Returns 1 when a new parse was stored."""
+    """Find this course's syllabus (pages, files and linked documents), parse it with DeepSeek into the syllabus_parsed
+    JSON, once per change. Checks each course at most every syllabus.recheck_hours (default 24). Returns 1 when a new
+    parse was stored. With nothing found, sends one Telegram message per course per quarter."""
     if cfg is None or not llm_parser.enabled(cfg) or not get(cfg, "syllabus.auto_fetch", True):
         return 0
-    age = _check_age_hours(f"syllabus_check:{course['id']}")
+    check_key = f"syllabus_check:{course['id']}"
+    age = _check_age_hours(check_key)
     if age is not None and age < int(get(cfg, "syllabus.recheck_hours", 24)):
         return 0
     sources = _syllabus_sources(page, course)
-    _mark_parsed(f"syllabus_check:{course['id']}", "checked")
+    _mark_parsed(check_key, "checked")
     if not sources:
+        quarter = get(cfg, "quarter_label", "") or "this quarter"
+        missing_key = f"syllabus_missing:{course['id']}"
+        if _page_changed(missing_key, quarter):
+            notifier.send_warning(f"No syllabus found on Canvas for {course.get('canvas_course_name')}, so Mimir has no class times "
+                                  f"or syllabus dates for it. Upload it on the Syllabus page: http://localhost:5000/syllabus")
+            _mark_parsed(missing_key, quarter)
         return 0
-    text = "\n\n".join(f"=== {label} ===\n{body}" for label, body in sources)
+    text = _combine(course, sources, syllabus_parser.MAX_CHARS)
     key = f"syllabus:{course['id']}"
     if not _page_changed(key, text):
         return 0
@@ -398,6 +505,10 @@ def scrape_syllabus(page, course, cfg=None):
     if result["status"] == "ok":
         _mark_parsed(key, text)
         return 1
+    if result["status"] == "error" and UNBILLED_FAILURE.search(result["message"] or ""):
+        # DeepSeek unreachable or out of credit: nothing was billed, so look again next cycle. A failure DeepSeek billed
+        # for (an unusable answer) waits for the normal recheck instead of paying again every 15 minutes.
+        execute_query("DELETE FROM scrape_cache WHERE page_key = %s", (check_key,))
     log_error(SCRIPT, "SyllabusParse", f"course {course['id']}", f"{result['status']}: {result['message']}")
     return 0
 
@@ -405,7 +516,7 @@ def scrape_syllabus(page, course, cfg=None):
 def run_cycle(cfg):
     path = cookie_file(cfg)
     if not os.path.exists(path):
-        log_error(SCRIPT, "NoSession", "run_cycle", f"{path} not found; run: python pollers/canvas_scraper.py --login")
+        log_error(SCRIPT, "NoSession", "run_cycle", f"{path} not found; run: python -m pollers.canvas_scraper --login")
         return "paused"
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
@@ -428,6 +539,8 @@ def run_cycle(cfg):
                         raise
                     except llm_parser.LLMParseError as e:   # one bad model answer must not abort the other pages
                         log_error(SCRIPT, "LLMParseError", f"{fn.__name__} course {course['id']}", str(e))
+                    except Exception as e:                  # nor may one page that fails (a timeout, a layout change) skip the other courses
+                        log_error(SCRIPT, type(e).__name__, f"{fn.__name__} course {course['id']} at {page.url}", str(e))
                 if i < len(courses) - 1:
                     time.sleep(2)
         except Exception as e:
@@ -454,5 +567,5 @@ if __name__ == "__main__":
         with sync_playwright() as p:
             ok = interactive_login(p, cookie_file(cfg))
         sys.exit(0 if ok else 1)
-    print("usage: python pollers/canvas_scraper.py --login")
+    print("usage: python -m pollers.canvas_scraper --login")
     sys.exit(1)

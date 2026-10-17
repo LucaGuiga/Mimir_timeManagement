@@ -12,7 +12,7 @@ from core.config import get, load_config, repo_root
 
 _pool = None
 _pool_lock = threading.Lock()
-POOL_SIZE = 5
+POOL_SIZE = 10   # main runs several scheduler jobs at once (stress, pushes, emails); 5 ran out once
 SCHEMA_PATH = os.path.join(repo_root(), "db", "schema.sql")
 _LOST = (mysql_errors.OperationalError, mysql_errors.InterfaceError)
 

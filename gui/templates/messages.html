@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Mimir · Messages{% endblock %}
+{% block content %}
+<h1>Messages</h1>
+<div class="card">
+  <h2>Sent to the bot</h2>
+  <p class="muted">What you send to the Mimir bot on Telegram lands here, checked every minute. Only your own chat (telegram.chat_id) is read.</p>
+  <table>
+    <tr><th>Received</th><th>Message</th></tr>
+    {% for m in rows %}<tr class="{{ '' if m.seen else 'unread' }}"><td>{{ m.received_at|dt }}</td><td style="white-space:pre-wrap">{{ m.text }}</td></tr>
+    {% else %}<tr><td colspan="2" class="muted">Nothing yet.</td></tr>{% endfor %}
+  </table>
+</div>
+<div class="card">
+  <h2>Waiting for the next digest</h2>
+  <p class="muted">Telegram updates are pooled and sent as one summary {{ wait }} minutes after the first one, together with any errors logged meanwhile.</p>
+  <table>
+    <tr><th>Queued</th><th>Level</th><th>Message</th></tr>
+    {% for q in pending %}<tr><td>{{ q.created_at|dt }}</td><td>{{ q.level }}</td><td style="white-space:pre-wrap">{{ q.text }}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">Nothing waiting.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

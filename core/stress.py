@@ -1,13 +1,13 @@
 """Stress ratio S_day. See calculate() for the equation."""
-import math
 from datetime import date, datetime, time, timedelta
 
+from core import workload
 from core.config import get, load_config
 from db.db import execute_query, fetch_all, fetch_one
 from logs.error_handler import log_error
 
 SCRIPT = "stress"
-DIFFICULTY_SCALE = 1.248
+DIFFICULTY_SCALE = workload.DIFFICULTY_SCALE
 
 
 def _hours(blocks, category):
@@ -40,15 +40,14 @@ def calculate(d=None, cfg=None):
     if isinstance(d, str):
         d = date.fromisoformat(d)
     ref = datetime.now() if d == date.today() else datetime.combine(d, time(12, 0))
-    presets = get(cfg, "difficulty_presets", {}) or {}
+    presets = workload.Presets(cfg)   # per class difficulty and hour scale
     min_days = float(get(cfg, "stress.min_days_remaining", 0.25))
     deadline_term = 0.0
-    for a in fetch_all("SELECT a.assignment_type, a.due_at FROM assignments a JOIN courses c ON c.id = a.course_id "
+    for a in fetch_all("SELECT a.course_id, a.assignment_type, a.due_at FROM assignments a JOIN courses c ON c.id = a.course_id "
                        "WHERE a.status IN ('pending','open') AND a.due_at IS NOT NULL AND a.due_at > %s AND c.active = TRUE",
                        (ref - timedelta(days=1),)):
-        x = float(presets.get(a["assignment_type"], presets.get("other", 2)))
         days = max(min_days, (a["due_at"] - ref).total_seconds() / 86400)
-        deadline_term += math.exp(x / DIFFICULTY_SCALE) / days
+        deadline_term += presets.hours(a["course_id"], a["assignment_type"]) / days
     s, _ = hours_slept(d, cfg)
     tp = get(cfg, "time_presets", {}) or {}
     alpha = float(tp.get("alpha", 2.0))

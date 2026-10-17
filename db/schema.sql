@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS professor_profiles (
   -- rolling counters behind the derived columns: {"days":[7 ints],"hours":[24 ints],"early_n","late_n","adh_n"}
   post_histogram JSON NULL,
   last_updated DATETIME NULL,
+  -- run 12: due dates against the syllabus (+ days = later than the syllabus), share within a day, matched assignments
+  avg_due_shift_days FLOAT NULL,
+  due_on_time_share FLOAT NULL,
+  syllabus_matched_count INT NOT NULL DEFAULT 0,
   UNIQUE KEY uq_professor_name (professor_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -39,6 +43,8 @@ CREATE TABLE IF NOT EXISTS courses (
   midterm_assignment_id INT NULL,
   final_assignment_id INT NULL,
   ical_course_code VARCHAR(50) NULL,
+  -- run 11: multiplier on estimated hours for this class (0.05 = 5%); NULL uses stress.hour_scale_subjects / hour_scale_default
+  hour_scale DECIMAL(5,3) NULL,
   UNIQUE KEY uq_canvas_course_id (canvas_course_id),
   KEY ix_courses_professor (professor_id),
   KEY ix_courses_ical_code (ical_course_code),
@@ -192,6 +198,10 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
   skip_reason VARCHAR(255) NULL,
   original_start_time TIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- run 11: blocks the planner generates ('class', 'study') are rebuilt each run; NULL = added by hand
+  source VARCHAR(16) NULL,
+  course_id INT NULL,
+  assignment_id INT NULL,
   KEY ix_blocks_date (date),
   KEY ix_blocks_date_category (date, time_category),
   KEY ix_blocks_skipped (skipped)
@@ -361,6 +371,61 @@ CREATE TABLE IF NOT EXISTS dashboard_access_log (
   outcome VARCHAR(20) NOT NULL,
   label VARCHAR(64) NULL,
   UNIQUE KEY uq_dashboard_access (ts, ip, outcome)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- run 11: difficulty per assignment type for one class; a missing row falls back to difficulty_presets in config.yaml
+CREATE TABLE IF NOT EXISTS course_presets (
+  course_id INT NOT NULL,
+  assignment_type VARCHAR(32) NOT NULL,
+  difficulty TINYINT NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (course_id, assignment_type),
+  CONSTRAINT fk_course_presets_course FOREIGN KEY (course_id) REFERENCES courses (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- run 11: weekly class meetings. 'syllabus' rows are replaced on every new parse; 'edited' rows (changed in the GUI) win.
+-- days: weekday letters M T W R F S U (R = Thursday, U = Sunday)
+CREATE TABLE IF NOT EXISTS class_meetings (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  course_id INT NOT NULL,
+  kind VARCHAR(32) NOT NULL DEFAULT 'lecture',
+  days VARCHAR(7) NOT NULL,
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  location VARCHAR(255) NULL,
+  source VARCHAR(16) NOT NULL DEFAULT 'syllabus',
+  syllabus_parsed_id INT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY ix_class_meetings_course (course_id),
+  CONSTRAINT fk_class_meetings_course FOREIGN KEY (course_id) REFERENCES courses (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- run 12: pooled Telegram digest and Telegram replies
+-- Messages waiting for the next digest. The digest goes out 30 minutes after the oldest waiting message or error.
+CREATE TABLE IF NOT EXISTS notification_queue (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  level VARCHAR(16) NOT NULL DEFAULT 'info',
+  text TEXT NOT NULL,
+  sent_at DATETIME NULL,
+  KEY ix_notification_queue_sent (sent_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Small named values the notifier keeps between runs (last error id reported, Telegram update offset).
+CREATE TABLE IF NOT EXISTS notifier_state (
+  name VARCHAR(64) NOT NULL PRIMARY KEY,
+  value VARCHAR(255) NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Messages you send back to the bot, from telegram.chat_id only. Shown on the GUI Messages page.
+CREATE TABLE IF NOT EXISTS telegram_inbox (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  update_id BIGINT NOT NULL,
+  received_at DATETIME NOT NULL,
+  text TEXT NOT NULL,
+  seen BOOLEAN NOT NULL DEFAULT FALSE,
+  UNIQUE KEY uq_telegram_inbox_update (update_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS schema_migrations (

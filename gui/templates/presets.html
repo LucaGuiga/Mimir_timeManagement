@@ -1,37 +1,164 @@
 {% extends "base.html" %}{% block title %}Mimir · Presets{% endblock %}
 {% block content %}
+<style>
+  .slider-row { display:grid; grid-template-columns: 11rem 1fr 4.5rem 9rem; align-items:center; gap:.6rem; margin:.25rem 0; }
+  .slider-row input[type=range] { width:100%; }
+  .slider-row .val { font-weight:600; text-align:right; }
+  .slider-row .est { color:var(--muted); text-align:right; }
+  @media (max-width: 560px) { .slider-row { grid-template-columns: 1fr 3.5rem; } .slider-row input[type=range] { grid-column: 1 / -1; } .slider-row .est { grid-column: 1 / -1; text-align:left; } }
+</style>
 <h1>Presets</h1>
+
 <div class="card">
-  <h2>Difficulty per assignment type</h2>
-  <p class="muted">1 to 5. Estimated hours = e<sup>x / 1.248</sup>, shown live.</p>
+  <h2>Default difficulty per assignment type</h2>
+  <p class="muted">1 to 5. Every class starts the quarter with these; change a class below. Estimated hours = e<sup>x / curve</sup> (curve is on the Stress card, now {{ '%.3f'|format(curve) }}).</p>
   <form method="post" action="{{ url_for('presets_save') }}">
     <input type="hidden" name="form" value="difficulty">
-    <table>
-      <tr><th>Type</th><th>Difficulty</th><th>Estimated hours</th></tr>
-      {% for t in types %}<tr><td>{{ t }}</td><td><input type="number" name="d_{{ t }}" min="1" max="5" step="1" value="{{ difficulty.get(t, 2) }}" class="diff"></td><td class="est">–</td></tr>{% endfor %}
-    </table>
-    <button>Save difficulty presets</button>
+    {% for t in types %}
+    <div class="slider-row" data-scale="1">
+      <span>{{ t }}</span>
+      <input type="range" name="d_{{ t }}" min="1" max="5" step="1" value="{{ difficulty.get(t, 2) }}" class="diff">
+      <span class="val"></span><span class="est"></span>
+    </div>
+    {% endfor %}
+    <button>Save default difficulty</button>
   </form>
 </div>
+
+{% for c in classes %}
+<div class="card" id="class-{{ c.id }}">
+  <h2>{{ c.ical_course_code or c.canvas_course_name }} {% if c.customised %}<span class="pill">custom</span>{% else %}<span class="pill">defaults</span>{% endif %}</h2>
+  <form method="post" action="{{ url_for('presets_course_save', course_id=c.id) }}" class="class-presets">
+    <div class="slider-row">
+      <span>Hour scale</span>
+      <input type="range" name="scale_pct" min="1" max="100" step="1" value="{{ c.scale_pct }}" class="scale">
+      <span class="val"></span><span class="est">default {{ c.default_pct }}%</span>
+    </div>
+    <p class="muted">Estimated hours for this class are multiplied by the hour scale.</p>
+    {% for t in types %}
+    <div class="slider-row">
+      <span>{{ t }}</span>
+      <input type="range" name="d_{{ t }}" min="1" max="5" step="1" value="{{ c.difficulty[t] }}" class="diff">
+      <span class="val"></span><span class="est"></span>
+    </div>
+    {% endfor %}
+    <button>Save {{ c.ical_course_code or c.canvas_course_name }}</button>
+  </form>
+  {% if c.customised %}
+  <form method="post" action="{{ url_for('presets_course_reset', course_id=c.id) }}" data-confirm="Reset {{ c.ical_course_code or c.canvas_course_name }} to the default difficulty and hour scale?">
+    <button class="small">Reset to defaults</button>
+  </form>
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="card" id="stress">
+  <h2>Stress</h2>
+  <p class="muted">The difficulty curve sets how many hours each difficulty means. The default 1.248 makes difficulty 5 about 55 hours;
+    a larger curve flattens it. The other sliders set when the stress ratio turns amber and red and its safety floors.</p>
+  <form method="post" action="{{ url_for('presets_save') }}">
+    <input type="hidden" name="form" value="stress">
+    <div class="slider-row">
+      <span>Difficulty curve</span>
+      <input type="range" id="curve" name="difficulty_curve" min="0.8" max="4" step="0.01" value="{{ curve }}" class="plain">
+      <span class="val"></span><span class="est" id="curve-preview"></span>
+    </div>
+    {% set rows = [
+      ('green_below', 'Green below', 0.1, 3, 0.05, '', 0.8),
+      ('amber_below', 'Amber below (red at or above)', 0.1, 5, 0.05, '', 1.0),
+      ('min_available_hours', 'Floor on free hours', 0.25, 6, 0.25, ' h', 0.5),
+      ('min_days_remaining', 'Floor on days to a deadline', 0.05, 2, 0.05, ' d', 0.25),
+      ('recalc_minutes', 'Recalculate every', 5, 120, 5, ' min', 15)] %}
+    {% for key, label, lo, hi, step, unit, dflt in rows %}
+    <div class="slider-row">
+      <span>{{ label }}</span>
+      <input type="range" name="{{ key }}" min="{{ lo }}" max="{{ hi }}" step="{{ step }}" value="{{ stress_cfg.get(key, dflt) }}" class="plain" data-unit="{{ unit }}">
+      <span class="val"></span><span class="est"></span>
+    </div>
+    {% endfor %}
+    <div class="slider-row">
+      <span>Default hour scale</span>
+      <input type="range" name="hour_scale_default_pct" min="1" max="100" step="1" value="{{ default_scale_pct }}" class="plain" data-unit="%">
+      <span class="val"></span><span class="est">classes not in hour_scale_subjects</span>
+    </div>
+    <button>Save stress settings</button>
+  </form>
+</div>
+
+<div class="card" id="study">
+  <h2>Study plan</h2>
+  <p class="muted">How the daily study blocks are laid out. Session length follows each class's hours; these bound it.</p>
+  <form method="post" action="{{ url_for('presets_save') }}">
+    <input type="hidden" name="form" value="study">
+    {% set rows = [
+      ('horizon_days', 'Plan ahead', 1, 21, 1, ' days', 7),
+      ('min_block_minutes', 'Shortest block', 15, 120, 15, ' min', 30),
+      ('max_block_minutes', 'Longest block', 30, 360, 15, ' min', 180),
+      ('break_minutes', 'Break between blocks', 0, 60, 5, ' min', 15),
+      ('max_hours_per_day', 'Most study per day', 1, 16, 0.5, ' h', 8)] %}
+    {% for key, label, lo, hi, step, unit, dflt in rows %}
+    <div class="slider-row">
+      <span>{{ label }}</span>
+      <input type="range" name="{{ key }}" min="{{ lo }}" max="{{ hi }}" step="{{ step }}" value="{{ study_cfg.get(key, dflt) }}" class="plain" data-unit="{{ unit }}">
+      <span class="val"></span><span class="est"></span>
+    </div>
+    {% endfor %}
+    <p class="inline">
+      <label>Earliest start <input type="time" name="day_start" value="{{ study_cfg.get('day_start', '08:00') }}" min="05:00" max="12:00"></label>
+      <label>Normal latest end <input type="time" name="latest_end" value="{{ study_cfg.get('latest_end', '22:00') }}" min="18:00" max="23:45"></label>
+      <label>Latest end when necessary <input type="time" name="hard_latest_end" value="{{ study_cfg.get('hard_latest_end', '23:45') }}" min="20:00" max="23:45"></label>
+    </p>
+    <button>Save study plan settings</button>
+  </form>
+</div>
+
 <div class="card">
   <h2>Time presets</h2>
-  <form method="post" action="{{ url_for('presets_save') }}" class="inline">
+  <form method="post" action="{{ url_for('presets_save') }}">
     <input type="hidden" name="form" value="time">
-    <label>Sleep target (h) <input type="number" step="0.25" min="4" max="12" name="sleep_target_hours" value="{{ tp.get('sleep_target_hours', 8) }}"></label>
-    <label>Commute (min) <input type="number" min="0" name="commute_minutes" value="{{ tp.get('commute_minutes', 0) }}"></label>
-    <label>Breakfast (min) <input type="number" min="0" name="breakfast_minutes" value="{{ tp.get('breakfast_minutes', 0) }}"></label>
-    <label>Lunch (min) <input type="number" min="0" name="lunch_minutes" value="{{ tp.get('lunch_minutes', 0) }}"></label>
-    <label>Dinner (min) <input type="number" min="0" name="dinner_minutes" value="{{ tp.get('dinner_minutes', 0) }}"></label>
-    <label>Chores (min) <input type="number" min="0" name="chores_minutes" value="{{ tp.get('chores_minutes', 0) }}"></label>
-    <label>Alpha (sleep penalty) <input type="number" step="0.1" min="0" name="alpha" value="{{ tp.get('alpha', 2.0) }}"></label>
+    {% set rows = [
+      ('sleep_target_hours', 'Sleep target', 4, 12, 0.25, ' h', 8),
+      ('commute_minutes', 'Commute', 0, 180, 5, ' min', 0),
+      ('breakfast_minutes', 'Breakfast', 0, 120, 5, ' min', 0),
+      ('lunch_minutes', 'Lunch', 0, 120, 5, ' min', 0),
+      ('dinner_minutes', 'Dinner', 0, 120, 5, ' min', 0),
+      ('chores_minutes', 'Chores', 0, 240, 5, ' min', 0),
+      ('alpha', 'Sleep penalty (alpha)', 0, 10, 0.1, '', 2.0)] %}
+    {% for key, label, lo, hi, step, unit, dflt in rows %}
+    <div class="slider-row">
+      <span>{{ label }}</span>
+      <input type="range" name="{{ key }}" min="{{ lo }}" max="{{ hi }}" step="{{ step }}" value="{{ tp.get(key, dflt) }}" class="plain" data-unit="{{ unit }}">
+      <span class="val"></span><span class="est"></span>
+    </div>
+    {% endfor %}
     <button>Save time presets</button>
   </form>
 </div>
+
 <script>
-document.querySelectorAll('input.diff').forEach(function (inp) {
-  var out = inp.closest('tr').querySelector('.est');
-  var upd = function () { var x = parseFloat(inp.value); out.textContent = isNaN(x) ? '–' : Math.exp(x / 1.248).toFixed(1) + ' h'; };
+var curveInp = document.getElementById('curve');
+var K = function () { return curveInp ? parseFloat(curveInp.value) : {{ curve }}; };
+var refreshAll = function () { document.querySelectorAll('input.diff').forEach(function (d) { d.dispatchEvent(new Event('input')); }); };
+if (curveInp) {
+  var prev = document.getElementById('curve-preview');
+  var showCurve = function () { prev.textContent = [1, 3, 5].map(function (x) { return x + ': ' + Math.exp(x / K()).toFixed(1) + 'h'; }).join('  '); refreshAll(); };
+  curveInp.addEventListener('input', showCurve);
+}
+document.querySelectorAll('.slider-row').forEach(function (row) {
+  var inp = row.querySelector('input[type=range]'), val = row.querySelector('.val'), est = row.querySelector('.est');
+  var form = row.closest('form'), scaleInp = form.querySelector('input.scale');
+  var upd = function () {
+    var x = parseFloat(inp.value);
+    if (inp.classList.contains('scale')) { val.textContent = x + '%'; form.querySelectorAll('input.diff').forEach(function (d) { d.dispatchEvent(new Event('input')); }); return; }
+    if (inp.classList.contains('diff')) {
+      var s = scaleInp ? parseFloat(scaleInp.value) / 100 : 1;
+      val.textContent = x; est.textContent = (Math.exp(x / K()) * s).toFixed(s < 1 ? 2 : 1) + ' h';
+      return;
+    }
+    val.textContent = x + (inp.dataset.unit || '');
+  };
   inp.addEventListener('input', upd); upd();
 });
+if (curveInp) curveInp.dispatchEvent(new Event('input'));
 </script>
 {% endblock %}

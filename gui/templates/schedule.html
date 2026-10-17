@@ -8,11 +8,12 @@
   <a class="button" href="{{ url_for('schedule') }}">Today</a>
 </form>
 <h2>{{ d.strftime('%A %b %d, %Y') }}</h2>
+<form method="post" action="{{ url_for('control_rebuild') }}" class="inline"><button class="small">Rebuild class and study blocks</button> <span class="muted">Mimir rebuilds them every morning, after a syllabus is read, and when presets or class times change. Blocks you add by hand are never changed.</span></form>
 <table>
-  <tr><th>Start</th><th>End</th><th>Label</th><th>Category</th><th>Pri</th><th>Moveable</th><th>Status</th><th></th></tr>
+  <tr><th>Start</th><th>End</th><th>Label</th><th>Category</th><th>From</th><th>Pri</th><th>Moveable</th><th>Status</th><th></th></tr>
   {% for b in blocks %}
   <tr class="{{ 'skipped' if b.skipped }}">
-    <td>{{ b.start_time|hhmm }}</td><td>{{ b.end_time|hhmm }}</td><td>{{ b.label }}</td><td>{{ b.time_category }}</td><td>{{ b.priority }}</td><td>{{ 'yes' if b.moveable else 'no' }}</td>
+    <td>{{ b.start_time|hhmm }}</td><td>{{ b.end_time|hhmm }}</td><td>{{ b.label }}</td><td>{{ b.time_category }}</td><td>{{ {'class': 'class times', 'study': 'study plan'}.get(b.source, 'added by hand') }}</td><td>{{ b.priority }}</td><td>{{ 'yes' if b.moveable else 'no' }}</td>
     <td>{% if b.skipped %}skipped ({{ b.skip_reason }}){% elif b.original_start_time %}shifted from {{ b.original_start_time|hhmm }}{% else %}–{% endif %}</td>
     <td class="actions">
       {% if b.skipped %}<form method="post" action="{{ url_for('schedule_unskip', block_id=b.id) }}"><input type="hidden" name="date" value="{{ d.isoformat() }}"><button class="small">Unskip</button></form>
@@ -20,8 +21,26 @@
       <form method="post" action="{{ url_for('schedule_delete', block_id=b.id) }}" data-confirm="Delete this block?"><input type="hidden" name="date" value="{{ d.isoformat() }}"><button class="small danger">Delete</button></form>
     </td>
   </tr>
-  {% else %}<tr><td colspan="8" class="muted">No blocks on this day.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="9" class="muted">No blocks on this day.</td></tr>{% endfor %}
 </table>
+<h2>Class times</h2>
+<p class="muted">Read from each syllabus. If one is wrong or changes, fix it here; your edits win over the syllabus.</p>
+{% for m in meetings %}
+<form method="post" action="{{ url_for('class_time_save', meeting_id=m.id) }}" class="inline card{{ '' if m.in_use else ' inactive' }}">
+  <input type="hidden" name="date" value="{{ d.isoformat() }}">
+  <strong>{{ m.ical_course_code or m.canvas_course_name }}</strong>
+  <label>Kind <select name="kind">{% for k in meeting_kinds %}<option value="{{ k }}"{{ ' selected' if k == m.kind }}>{{ k }}</option>{% endfor %}</select></label>
+  <span>{% for x in day_letters %}<label><input type="checkbox" name="day_{{ x }}"{{ ' checked' if x in m.days }}> {{ x }}</label>{% endfor %}</span>
+  <label>Start <input type="time" name="start_time" value="{{ m.start_time|hhmm }}" required></label>
+  <label>End <input type="time" name="end_time" value="{{ m.end_time|hhmm }}" required></label>
+  <label>Location <input name="location" value="{{ m.location or '' }}" size="14"></label>
+  <span class="pill">{{ 'edited' if m.source == 'edited' else 'from syllabus' }}{{ '' if m.in_use else ', replaced by your edits' }}</span>
+  <button class="small">Save</button>
+  <button class="small danger" formaction="{{ url_for('class_time_delete', meeting_id=m.id) }}" data-confirm="Remove this class time?">Remove</button>
+  {% if m.source == 'edited' %}<button class="small" formaction="{{ url_for('class_time_reset', course_id=m.course_id) }}" data-confirm="Drop your edits for this class and read its syllabus again?">Use syllabus again</button>{% endif %}
+</form>
+{% else %}<p class="muted">No class times yet. They appear here once a syllabus has been read.</p>{% endfor %}
+{% if missing %}<p class="muted">No class times for: {% for c in missing %}{{ c.ical_course_code or c.canvas_course_name }}{{ ', ' if not loop.last }}{% endfor %}. Mimir sends a Telegram message when a syllabus has none.</p>{% endif %}
 <h2>Add block</h2>
 <form method="post" action="{{ url_for('schedule_add') }}" class="inline card">
   <input type="hidden" name="date" value="{{ d.isoformat() }}">

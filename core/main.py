@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from core import aws_push, dashboard_passwords, email_sender, notifier, professor_profiler, progress, repo_manager, schedule_builder, stress
+from core import aws_push, dashboard_passwords, email_sender, notifier, planner, professor_profiler, progress, repo_manager, schedule_builder, stress
 from core.config import ConfigError, get, load_config, repo_root, validate_config
 from core.supervisor import Supervisor
 from db.db import DBError, execute_query, fetch_all, fetch_one
@@ -93,7 +93,10 @@ def run():
     sched.add_job(_safe("profiler sweep", professor_profiler.sweep), IntervalTrigger(seconds=60), id="profiler")
     sched.add_job(_safe("stress", lambda: stress.calculate_and_store(date.today())),
                   IntervalTrigger(minutes=int(get(cfg, "stress.recalc_minutes", 15))), id="stress")
-    sched.add_job(_safe("schedule builder", schedule_builder.run_for_today), _cron(get(cfg, "schedule_builder.run_time", "06:30")), id="schedule")
+    def _daily_schedule():
+        planner.plan_safely()            # class blocks and study blocks first,
+        schedule_builder.run_for_today()  # then skip or shift by today's stress
+    sched.add_job(_safe("schedule builder", _daily_schedule), _cron(get(cfg, "schedule_builder.run_time", "06:30")), id="schedule")
     sched.add_job(_safe("no_commit_sweep", lambda: progress.no_commit_sweep(date.today())), CronTrigger(hour=23, minute=55), id="no_commit")
     sched.add_job(_safe("morning email", email_sender.send_morning), _cron(get(cfg, "email.morning_time", "07:30")), id="email_am")
     sched.add_job(_safe("evening email", email_sender.send_evening), _cron(get(cfg, "email.evening_time", "21:00")), id="email_pm")
@@ -104,6 +107,9 @@ def run():
     sched.add_job(_safe("oura stress check", lambda: oura_stress_check(cfg)), IntervalTrigger(minutes=60), id="oura_stress_check")
     sched.add_job(_safe("repo manager", lambda: repo_manager.check_new_courses(cfg)), IntervalTrigger(seconds=60), id="repo_manager")
     sched.add_job(_safe("assignment reminders", lambda: notifier.check_assignment_reminders(cfg)), CronTrigger(hour=8, minute=0), id="assignment_reminders")
+    # Telegram: one pooled digest per telegram.digest_minutes, and replies sent to the bot saved for the GUI Messages page
+    sched.add_job(_safe("telegram digest", notifier.flush_digest), IntervalTrigger(seconds=60), id="telegram_digest")
+    sched.add_job(_safe("telegram replies", notifier.poll_replies), IntervalTrigger(seconds=int(get(cfg, "telegram.reply_poll_seconds", 60))), id="telegram_replies")
 
     def _handle(signum, frame):
         _stop.set()
@@ -112,6 +118,7 @@ def run():
     signal.signal(signal.SIGINT, _handle)
     sched.start()
     _safe("push dashboard passwords", dashboard_passwords.push_passwords)()
+    _safe("plan at startup", planner.plan_safely)()
     _safe("stress at startup", lambda: stress.calculate_and_store(date.today()))()
     while not _stop.is_set():
         _stop.wait(1.0)

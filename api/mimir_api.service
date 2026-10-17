@@ -7,13 +7,14 @@
 [Unit]
 Description=Mimir snapshot API and dashboard
 After=network.target
+Before=mimir.service
 
 [Service]
 Type=simple
-User=mimir
-Group=mimir
-WorkingDirectory=/opt/mimir/api
-ExecStart=/opt/mimir/venv/bin/uvicorn fastapi_app:app --host 0.0.0.0 --port 8000
+User=lucaguiga
+Group=lucaguiga
+WorkingDirectory=/home/lucaguiga/Desktop/School/Projects/Mimir_timeManagement/api
+ExecStart=/home/lucaguiga/Desktop/School/Projects/Mimir_timeManagement/venv/bin/uvicorn fastapi_app:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
 

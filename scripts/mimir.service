@@ -13,11 +13,12 @@ Requires=mysql.service
 
 [Service]
 Type=forking
-User=mimir
-WorkingDirectory=/home/mimir/mimir
-ExecStart=/home/mimir/mimir/scripts/startup.sh
-ExecStop=/home/mimir/mimir/scripts/shutdown.sh
-PIDFile=/home/mimir/mimir/run/main.pid
+User=lucaguiga
+WorkingDirectory=/home/lucaguiga/Desktop/School/Projects/Mimir_timeManagement
+Environment=PYTHON=/home/lucaguiga/Desktop/School/Projects/Mimir_timeManagement/venv/bin/python
+ExecStart=/home/lucaguiga/Desktop/School/Projects/Mimir_timeManagement/scripts/startup.sh
+ExecStop=/home/lucaguiga/Desktop/School/Projects/Mimir_timeManagement/scripts/shutdown.sh
+PIDFile=/home/lucaguiga/Desktop/School/Projects/Mimir_timeManagement/run/main.pid
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=60

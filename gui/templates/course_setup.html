@@ -24,24 +24,27 @@
 <button type="submit">Continue to Preview</button>
 </form>
 {% elif step == "preview" %}
-<h1>Repo Preview — Review before creating</h1>
+{% set shared = preview and preview[0].path %}
+<h1>{{ 'Folder Preview' if shared else 'Repo Preview' }} — Review before creating</h1>
+{% if shared %}<p class="muted">All courses go into one private repo, <code>{{ preview[0].repo_name }}</code>, with a folder per course. The repo is created the first time if it does not exist yet.</p>{% endif %}
 {% for p in preview %}
 <div class="repo-card"><dl>
   <dt>Repo name</dt><dd>{{ p.repo_name }}</dd>
-  <dt>Course</dt><dd>{{ p.ical_course_code }} — {{ seeded[p.course_id].canvas_course_name }}{% if not seeded[p.course_id].monitor %} <span class="muted">(not monitored, no repo will be created)</span>{% endif %}</dd>
+  {% if p.path %}<dt>Course folder</dt><dd><code>{{ p.path }}/</code></dd>{% endif %}
+  <dt>Course</dt><dd>{{ p.ical_course_code }} — {{ seeded[p.course_id].canvas_course_name }}{% if not seeded[p.course_id].monitor %} <span class="muted">(not monitored, nothing will be created)</span>{% endif %}</dd>
   <dt>Type</dt><dd>{{ 'Lab section' if p.is_lab else 'Lecture' }}</dd>
   <dt>Branches</dt><dd>{{ p.branches|join(', ') }}</dd>
   <dt>Folders</dt><dd>{{ p.folders|join(', ') }}</dd>
   {% if p.lab_folder_note %}<dt>Note</dt><dd>{{ p.lab_folder_note }}</dd>{% endif %}
 </dl></div>
 {% endfor %}
-<form method="post" action="{{ url_for('setup_create') }}"><button type="submit" class="btn-primary">Verify — Create Repos</button></form>
+<form method="post" action="{{ url_for('setup_create') }}"><button type="submit" class="btn-primary">Verify — {{ 'Create Course Folders' if shared else 'Create Repos' }}</button></form>
 <p><a href="{{ url_for('setup', step='select') }}">← Go back and change selection</a></p>
 {% elif step == "done" %}
 <h1>Setup Complete</h1>
 <p>The following courses are now tracked by Mimir:</p>
 <ul>
-  {% for c in courses %}<li>{{ c.ical_course_code }} — {{ c.canvas_course_name }}{% if c.is_lab %} (lab){% endif %}</li>
+  {% for c in courses %}<li>{{ c.ical_course_code }} — {{ c.canvas_course_name }}{% if c.is_lab %} (lab){% endif %}{% if c.repo_name %}: <code>{{ c.repo_name }}{% if c.repo_path_prefix %}/{{ c.repo_path_prefix }}{% endif %}</code>{% endif %}</li>
   {% else %}<li class="muted">No courses have completed setup.</li>{% endfor %}
 </ul>
 <p><a href="{{ url_for('monitoring') }}">Configure monitoring settings →</a></p>

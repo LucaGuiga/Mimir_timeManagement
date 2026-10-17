@@ -61,8 +61,12 @@ def build_snapshots(cfg=None):
     status = {r["api_name"]: r for r in fetch_all("SELECT api_name, state, last_cycle_at FROM poller_status")}
     avg = {r["api_name"]: r["avg_us"] for r in fetch_all(
         "SELECT api_name, AVG(response_time_us) AS avg_us FROM poll_metrics WHERE timestamp >= %s GROUP BY api_name", (now - timedelta(hours=1),))}
+    oura_times = get(cfg, "oura.poll_times", []) or []
+    every = {"ical": float(get(cfg, "ical.poll_minutes", 10)), "github": float(get(cfg, "github.poll_seconds", 60)) / 60,
+             "oura": 24 * 60 / len(oura_times) if oura_times else None}   # minutes between polls; None = not polling
     snap["poll_metrics_summary"] = {api: {"last_poll": (status.get(api) or {}).get("last_cycle_at"),
                                           "avg_response_us": None if avg.get(api) is None else int(avg[api]),
+                                          "interval_minutes": None if every[api] is None else round(every[api], 2),
                                           "state": (status.get(api) or {}).get("state")} for api in ("ical", "github", "oura")}
     for k in ("schedule_today", "commits_recent", "oura_recent"):
         for r in snap[k]:
