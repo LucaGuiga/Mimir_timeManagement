@@ -11,7 +11,7 @@ def no_commit_sweep(d=None):
     d = d or date.today()
     logged_at = datetime.now() if d == date.today() else datetime.combine(d, time(23, 59, 59))
     rows = fetch_all("SELECT a.id, a.course_id, c.repo_name, c.repo_path_prefix, c.branches FROM assignments a "
-                     "JOIN courses c ON c.id = a.course_id WHERE a.status IN ('pending','open') AND c.mapped = TRUE AND c.active = TRUE")
+                     "JOIN courses c ON c.id = a.course_id WHERE a.status IN ('pending','open') AND a.is_event = FALSE AND c.mapped = TRUE AND c.active = TRUE")
     inserted = 0
     for a in rows:
         hit = fetch_one("SELECT 1 AS x FROM github_commits WHERE assignment_id = %s AND "

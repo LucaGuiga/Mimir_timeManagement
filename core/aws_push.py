@@ -40,7 +40,7 @@ def build_snapshots(cfg=None):
         "WHERE date >= %s GROUP BY date) l ON l.date = s.date AND l.m = s.calculated_at ORDER BY s.date", (today - timedelta(days=90),))
     upcoming = []
     for a in fetch_all("SELECT a.id, a.title, a.assignment_type, a.due_at, a.status, c.canvas_course_name AS course_name FROM assignments a "
-                       "JOIN courses c ON c.id = a.course_id WHERE a.status IN ('pending','open') AND a.due_at BETWEEN %s AND %s "
+                       "JOIN courses c ON c.id = a.course_id WHERE a.status IN ('pending','open') AND a.is_event = FALSE AND a.due_at BETWEEN %s AND %s "
                        "ORDER BY a.due_at", (now - timedelta(days=1), now + timedelta(days=14))):
         cs = progress.commit_summary_for_assignment(a["id"])
         upcoming.append({"course_name": a["course_name"], "title": a["title"], "assignment_type": a["assignment_type"],

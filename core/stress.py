@@ -88,7 +88,7 @@ def calculate_plan(d=None, cfg=None):
     min_days = float(get(cfg, "stress.min_days_remaining", 0.25))
     needed = 0.0
     for a in fetch_all("SELECT a.id, a.course_id, a.assignment_type, a.due_at FROM assignments a JOIN courses c ON c.id = a.course_id "
-                       "WHERE a.status IN ('pending','open') AND a.due_at IS NOT NULL AND a.due_at > %s AND c.active = TRUE", (ref,)):
+                       "WHERE a.status IN ('pending','open') AND a.is_event = FALSE AND a.due_at IS NOT NULL AND a.due_at > %s AND c.active = TRUE", (ref,)):
         remaining = max(0.0, presets.hours(a["course_id"], a["assignment_type"]) - done.get(a["id"], 0.0))
         days_left = max(min_days, (a["due_at"] - ref).total_seconds() / 86400)
         needed += remaining * min(1.0, window / days_left)
@@ -113,7 +113,7 @@ def calculate_daily(d=None, cfg=None):
     min_days = float(get(cfg, "stress.min_days_remaining", 0.25))
     deadline_term = 0.0
     for a in fetch_all("SELECT a.course_id, a.assignment_type, a.due_at FROM assignments a JOIN courses c ON c.id = a.course_id "
-                       "WHERE a.status IN ('pending','open') AND a.due_at IS NOT NULL AND a.due_at > %s AND c.active = TRUE",
+                       "WHERE a.status IN ('pending','open') AND a.is_event = FALSE AND a.due_at IS NOT NULL AND a.due_at > %s AND c.active = TRUE",
                        (ref - timedelta(days=1),)):
         days = max(min_days, (a["due_at"] - ref).total_seconds() / 86400)
         deadline_term += presets.hours(a["course_id"], a["assignment_type"]) / days

@@ -240,7 +240,7 @@ def _norm(title):
 
 
 def _match_items(course_id, items):
-    rows = fetch_all("SELECT id, title, assignment_type, assignment_number FROM assignments WHERE course_id = %s", (int(course_id),))
+    rows = fetch_all("SELECT id, title, assignment_type, assignment_number FROM assignments WHERE course_id = %s AND is_event = FALSE", (int(course_id),))
     by_key = {(r["assignment_type"], r["assignment_number"]): r["id"] for r in rows if r["assignment_number"] is not None}
     by_title = {_norm(r["title"]): r["id"] for r in rows}
     matched = 0
@@ -298,7 +298,7 @@ def parse(cfg, course_id, raw_text):
         data, verified = draft, False
         try:   # second pass: check the draft against the same sources and list where the sources disagree
             draft_json = json.dumps(draft)
-            canvas = fetch_all("SELECT id, title, assignment_type, due_at FROM assignments WHERE course_id = %s ORDER BY due_at", (course["id"],))
+            canvas = fetch_all("SELECT id, title, assignment_type, due_at FROM assignments WHERE course_id = %s AND is_event = FALSE ORDER BY due_at", (course["id"],))
             canvas_text = "\n".join(f"{a['id']} | {a['title']} | {a['assignment_type']} | due {a['due_at']:%Y-%m-%d %H:%M}" if a["due_at"]
                                     else f"{a['id']} | {a['title']} | {a['assignment_type']} | no due date" for a in canvas)
             data, cost2 = llm_parser.json_call(cfg, "syllabus_verify", VERIFY_PROMPT,
@@ -309,7 +309,7 @@ def parse(cfg, course_id, raw_text):
         except llm_parser.LLMParseError as e:
             log_error(SCRIPT, "VerifyFailed", f"verify course {course_id}", f"using the unverified first pass: {e}")
         result["cost"] = round(cost, 4)
-        allowed = {r["id"] for r in fetch_all("SELECT id FROM assignments WHERE course_id = %s", (course["id"],))}
+        allowed = {r["id"] for r in fetch_all("SELECT id FROM assignments WHERE course_id = %s AND is_event = FALSE", (course["id"],))}
         errors, cleaned = _validate(data, window, allowed)
         if cleaned is not None:
             cleaned["verified"] = verified

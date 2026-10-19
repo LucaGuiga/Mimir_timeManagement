@@ -149,8 +149,9 @@ def _upsert_event(cfg, course, comp, now):
         status = "pending" if due and due > now else "open"
         aid = execute_query(
             "INSERT INTO assignments (course_id, canvas_assignment_id, title, assignment_type, assignment_number, due_at, status, "
-            "canvas_posted_at, canvas_assignment_url, ical_uid, is_midterm, is_final) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (course["id"], canvas_id, title, atype, _number(title), due, status, posted_at(comp, now), url, uid, is_mid, is_fin))
+            "canvas_posted_at, canvas_assignment_url, ical_uid, is_midterm, is_final, is_event) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (course["id"], canvas_id, title, atype, _number(title), due, status, posted_at(comp, now), url, uid, is_mid, is_fin,
+             canvas_id < 0))   # negative id: a Canvas calendar event, not an assignment
     else:
         aid = row["id"]
         if due != row["due_at"] and due is not None and not row.get("manual_due"):   # a due date you set through Telegram wins
@@ -179,7 +180,7 @@ def send_due_reminders(now=None):
     now = now or datetime.now()
     rows = fetch_all(
         "SELECT a.*, c.canvas_course_name, c.ical_course_code FROM assignments a JOIN courses c ON c.id = a.course_id "
-        "WHERE c.monitor = TRUE AND c.telegram_enabled = TRUE AND a.reminder_24h_sent = FALSE "
+        "WHERE c.monitor = TRUE AND c.telegram_enabled = TRUE AND a.reminder_24h_sent = FALSE AND a.is_event = FALSE "
         "AND a.status NOT IN ('submitted','graded') AND a.due_at > %s AND a.due_at <= %s", (now, now + timedelta(hours=24)))
     sent = 0
     for a in rows:

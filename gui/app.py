@@ -112,7 +112,7 @@ def create_app(cfg=None):
         s = stress.latest_for(today)
         blocks = fetch_all("SELECT * FROM schedule_blocks WHERE date = %s ORDER BY start_time, id", (today,))
         due = fetch_all("SELECT a.*, c.canvas_course_name FROM assignments a JOIN courses c ON c.id = a.course_id "
-                        "WHERE a.status IN ('pending','open') AND a.due_at BETWEEN %s AND %s ORDER BY a.due_at", (now, now + timedelta(days=7)))
+                        "WHERE a.status IN ('pending','open') AND a.is_event = FALSE AND a.due_at BETWEEN %s AND %s ORDER BY a.due_at", (now, now + timedelta(days=7)))
         for a in due:
             a["days_remaining"] = round((a["due_at"] - now).total_seconds() / 86400, 1)
         avg = {r["api_name"]: r for r in fetch_all("SELECT api_name, AVG(response_time_us) AS avg_us, MAX(timestamp) AS last FROM poll_metrics "

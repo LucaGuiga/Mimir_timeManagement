@@ -187,7 +187,7 @@ def plan(cfg=None, today=None, now=None):
         (today, today, _hhmm(now_min)))}
     rows = fetch_all("SELECT a.id, a.course_id, a.title, a.assignment_type, a.due_at, c.ical_course_code, c.canvas_course_name "
                      "FROM assignments a JOIN courses c ON c.id = a.course_id WHERE a.status IN ('pending','open') AND a.due_at > %s "
-                     "AND c.active = TRUE AND c.monitor = TRUE", (now,))
+                     "AND a.is_event = FALSE AND c.active = TRUE AND c.monitor = TRUE", (now,))
     assignments = [{"id": r["id"], "course_id": r["course_id"], "due_at": r["due_at"], "done": done.get(r["id"], 0.0),
                     "hours": presets.hours(r["course_id"], r["assignment_type"]), "label": f"Study: {_code(r)} {r['title']}"[:255]} for r in rows]
     study = study_blocks(assignments, busy, today, now_min, st)

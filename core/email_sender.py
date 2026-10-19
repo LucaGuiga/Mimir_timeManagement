@@ -98,7 +98,7 @@ def send_morning(cfg=None):
     parts.append(_section("Schedule", [f"{_fmt(b['start_time'])}-{_fmt(b['end_time'])} {b['label']} [{b['time_category']}]"
                                        + (f" SKIPPED ({b['skip_reason']})" if b["skipped"] else "") for b in blocks]))
     due = fetch_all("SELECT a.title, a.assignment_type, a.due_at, a.status, c.canvas_course_name FROM assignments a "
-                    "JOIN courses c ON c.id = a.course_id WHERE a.status IN ('pending','open') AND a.due_at BETWEEN %s AND %s "
+                    "JOIN courses c ON c.id = a.course_id WHERE a.status IN ('pending','open') AND a.is_event = FALSE AND a.due_at BETWEEN %s AND %s "
                     "ORDER BY a.due_at", (now, now + timedelta(days=7)))
     parts.append(_section("Due within 7 days", [f"{_fmt(a['due_at'])}  {a['canvas_course_name']}: {a['title']} ({a['assignment_type']})" for a in due]))
     # Upcoming milestones: always shown, one line per active course
@@ -116,7 +116,7 @@ def send_morning(cfg=None):
             rows.append(f"{_code(c)}: no midterm or final detected yet")
     parts.append(_section("Upcoming milestones", rows, "no active courses"))
     radar = fetch_all("SELECT a.title, a.assignment_type, a.due_at, a.status, c.canvas_course_name, c.ical_course_code FROM assignments a "
-                      "JOIN courses c ON c.id = a.course_id WHERE c.active = TRUE AND a.status IN ('pending','open') "
+                      "JOIN courses c ON c.id = a.course_id WHERE c.active = TRUE AND a.is_event = FALSE AND a.status IN ('pending','open') "
                       "AND a.assignment_type IN ('test','quiz','project_milestone') ORDER BY a.due_at IS NULL, a.due_at")
     parts.append(_section("Tests and projects on the radar", [f"{_fmt(r['due_at']) or 'no date'}  {_code(r)}: {r['title']} ({r['assignment_type']}, {r['status']})" for r in radar], "None active"))
     # ANNOUNCEMENTS: held pending LLM summarisation (run 7)
@@ -164,7 +164,7 @@ def send_evening(cfg=None):
     # Per assignment status log, grouped by course, monitored and email enabled courses only
     log_rows = fetch_all(
         "SELECT a.id, a.title, a.assignment_type, a.status, a.due_at, a.grade_percent, c.canvas_course_name, c.ical_course_code "
-        "FROM assignments a JOIN courses c ON c.id = a.course_id WHERE c.active = TRUE AND c.monitor = TRUE AND c.email_enabled = TRUE "
+        "FROM assignments a JOIN courses c ON c.id = a.course_id WHERE c.active = TRUE AND c.monitor = TRUE AND c.email_enabled = TRUE AND a.is_event = FALSE "
         "AND (a.status IN ('pending','open','submitted') OR a.grade_detected_at >= %s) ORDER BY c.canvas_course_name, a.due_at IS NULL, a.due_at",
         (now - timedelta(days=7),))
     today_commits = {r["assignment_id"]: r for r in fetch_all(

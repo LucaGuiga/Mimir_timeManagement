@@ -387,6 +387,10 @@ def scrape_announcements(page, course, cfg=None):
 
 def scrape_assignments(page, course, cfg=None):
     _goto(page, f"/courses/{course['canvas_course_id']}/assignments")
+    if not urlsplit(page.url).path.rstrip("/").endswith("/assignments"):
+        # the course hides its Assignments page (THEA80 does) and Canvas sent us to the home page, whose Modules rows look
+        # like assignment rows but are pages and links; statuses for this course come from scrape_grades instead
+        return 0
     rows = page.locator(".ig-row, [data-testid='assignment-row'], .assignment-row")
     n = rows.count()
     if n == 0 and cfg is not None and llm_parser.enabled(cfg):
@@ -425,8 +429,58 @@ def scrape_assignments(page, course, cfg=None):
     return updated
 
 
+def read_grade_rows(page):
+    """[{title, graded, submitted, missing, late, percent}] from the course Grades page (tr.student_assignment rows).
+    Works when a course hides its Assignments page. Read only: the What-If score inputs are never touched."""
+    out = []
+    rows = page.locator("tr.student_assignment")
+    for i in range(rows.count()):
+        r = rows.nth(i)
+        title_el = r.locator("th.title a")
+        title = (title_el.first.inner_text() if title_el.count() else r.locator("th.title").first.inner_text()).split("\n")[0].strip()
+        cls = r.get_attribute("class") or ""
+        status = (r.locator("td.status").first.inner_text().strip().lower() if r.locator("td.status").count() else "")
+        score = r.locator("td.assignment_score").first.inner_text() if r.locator("td.assignment_score").count() else ""
+        score = score.replace("Click to test a different score", " ")
+        missing = status == "missing"
+        # Canvas gives missing work an automatic 0 and marks it graded; missing wins, it is still not handed in
+        graded = "assignment_graded" in cls and not missing
+        submitted = not missing and (graded or r.locator(".submission_icon").count() > 0 or "Submission" in score or status == "late")
+        out.append({"title": title, "graded": graded, "submitted": submitted, "missing": missing, "late": status == "late",
+                    "percent": parse_grade_percent(score) if graded else None})
+    return out
+
+
+def scrape_grades(page, course, cfg=None):
+    """Submission status and grades for every assignment from the Grades page. Moves a status forward only
+    (open/pending -> submitted -> graded); calendar events are left alone. Returns how many assignments changed."""
+    _goto(page, f"/courses/{course['canvas_course_id']}/grades")
+    if _looks_like_login(page):
+        raise SessionExpiredError("Canvas session expired. Run: python -m pollers.canvas_scraper --login")
+    if "/grades" not in urlsplit(page.url).path:
+        return 0
+    known = {_norm(a["title"]): a for a in fetch_all("SELECT id, title, status, grade_percent FROM assignments "
+                                                     "WHERE course_id = %s AND is_event = FALSE", (course["id"],))}
+    updated = 0
+    for g in read_grade_rows(page):
+        a = known.get(_norm(g["title"]))
+        if not a:
+            continue
+        new_status = "graded" if g["graded"] else "submitted" if g["submitted"] else None
+        sets, params = [], []
+        if new_status and _RANK[new_status] > _RANK.get(a["status"], 0):
+            sets.append("status = %s"); params.append(new_status)
+        if g["percent"] is not None and a["grade_percent"] is None:
+            sets.append("grade_percent = %s"); params.append(g["percent"])
+            sets.append("grade_detected_at = %s"); params.append(datetime.now())
+        if sets:
+            execute_query(f"UPDATE assignments SET {', '.join(sets)} WHERE id = %s", params + [a["id"]])
+            updated += 1
+    return updated
+
+
 SYLLABUS_HINT = re.compile(r"syllabus", re.I)
-GDOC_RE = re.compile(r"docs\.google\.com/document/d/([A-Za-z0-9_-]{20,})")
+GDOC_RE =re.compile(r"docs\.google\.com/document/d/([A-Za-z0-9_-]{20,})")
 GDRIVE_RE = re.compile(r"drive\.google\.com/(?:file/d/|open\?id=|uc\?(?:[^\"' ]*&)?id=)([A-Za-z0-9_-]{20,})")
 MAX_PDF_BYTES = 15 * 1024 * 1024
 MAX_PDFS = 3                   # most files (and Google documents) read per course
@@ -654,7 +708,7 @@ def run_cycle(cfg):
         courses = fetch_all("SELECT id, canvas_course_id, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE AND canvas_course_id > 0 ORDER BY id")
         try:
             for i, course in enumerate(courses):
-                for fn in (scrape_announcements, scrape_assignments, scrape_syllabus):
+                for fn in (scrape_announcements, scrape_assignments, scrape_grades, scrape_syllabus):
                     try:
                         fn(page, course, cfg)
                     except SessionExpiredError:

@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS assignments (
   -- run 14: a due date changed through Telegram wins over the iCal feed; source 'telegram' = added by you
   manual_due BOOLEAN NOT NULL DEFAULT FALSE,
   source VARCHAR(16) NULL,
+  -- run 15: a Canvas calendar event (office hours, a lecture session) from the iCal feed, not something to hand in
+  is_event BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE KEY uq_canvas_assignment_id (canvas_assignment_id),
   UNIQUE KEY uq_ical_uid (ical_uid),
   KEY ix_assignments_grade_detected (grade_detected_at),

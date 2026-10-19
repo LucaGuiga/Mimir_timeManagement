@@ -258,24 +258,58 @@ def branch_and_folder(assignment_type, cfg):
     return branch, folder
 
 
-def send_assignment_reminder(assignment, course, cfg):
+REPO_TYPES = ("hw", "lab", "test", "quiz", "project_milestone", "reading")   # types with a category folder for your files
+
+
+def reminder_name(assignment):
+    """"HW 3 (Homework-3)" for a numbered assignment of a known type; otherwise the Canvas title as it is. Never an
+    invented number: an "other" item such as a discussion keeps its own name."""
+    atype, number, title = assignment.get("assignment_type") or "other", assignment.get("assignment_number"), (assignment.get("title") or "").strip()
+    if atype in REPO_TYPES and number:
+        short = f"{TYPE_LABELS[atype]} {number}"
+        return f"{short} ({title})" if title and _norm_title(title) != _norm_title(short) else short
+    return title or "an assignment"
+
+
+def _norm_title(s):
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def due_phrase(due, now):
+    """"overdue, it was due Sun Oct 18 23:59", "due today at 23:59", "due tomorrow at 23:59", "due in 3 days (Thu Oct 22 23:59)"."""
+    if due < now:
+        return f"overdue, it was due {due:%a %b} {due.day} {due:%H:%M}"
+    days = (due.date() - now.date()).days
+    if days == 0:
+        return f"due today at {due:%H:%M}"
+    if days == 1:
+        return f"due tomorrow at {due:%H:%M}"
+    return f"due in {days} days ({due:%a %b} {due.day} {due:%H:%M})"
+
+
+def send_assignment_reminder(assignment, course, cfg, now=None):
     from core.naming_schema import format_expected
+    now = now or datetime.now()
     atype = assignment.get("assignment_type") or "other"
-    label = TYPE_LABELS.get(atype, "HW")
-    number = assignment.get("assignment_number") or 1
+    number = assignment.get("assignment_number")
     prefix = (course.get("repo_path_prefix") or "").strip("/")   # course folder in the shared repo, e.g. Fall-2026/ECE129
     # the course code in filenames is the course folder (ECE129) in the shared repo, the repo name in a per course repo
     code = prefix.rsplit("/", 1)[-1] if prefix else (course.get("repo_name") or course.get("ical_course_code") or course.get("canvas_course_name") or "COURSE")
     due = assignment.get("due_at")
-    days = max(0, int((due - datetime.now()).total_seconds() // 86400)) if due else 0
-    branch, folder = branch_and_folder(atype, cfg)
-    path = f"{prefix}/{folder}/{label}{number}/" if prefix else f"{folder}/{label}{number}/"
-    body = (f"{code} \u2014 {label} {number} due in {days} day(s)\n\n"
-            f"Upload to: {path} in {course.get('repo_name') or 'the course repo'} (branch {branch})\n"
-            f"Files should be named: {format_expected(label, number, 'n', 'n', code)}\n\n"
-            f"Git commands:\n  git checkout {branch}\n  git add {path}\n"
-            f"  git commit -m \"{code} {label}{number} complete\"\n  git push origin {branch}")
-    return send_critical(body) if days == 0 else send_warning(body)
+    overdue = due < now
+    body = f"{code}: {reminder_name(assignment)} is {due_phrase(due, now)}" + (" and is not submitted yet" if overdue else "")
+    if atype in REPO_TYPES:   # upload instructions only where there is a folder for it
+        branch, folder = branch_and_folder(atype, cfg)
+        label = TYPE_LABELS[atype]
+        base = f"{prefix}/{folder}" if prefix else folder
+        path = f"{base}/{label}{number}/" if number else f"{base}/"
+        body += f"\n\nUpload to: {path} in {course.get('repo_name') or 'the course repo'} (branch {branch})"
+        if number:
+            body += (f"\nFiles should be named: {format_expected(label, number, 'n', 'n', code)}\n\n"
+                     f"Git commands:\n  git checkout {branch}\n  git add {path}\n"
+                     f"  git commit -m \"{code} {label}{number} complete\"\n  git push origin {branch}")
+    # critical only for work still due later today; overdue work and anything further out is a warning
+    return send_critical(body) if not overdue and due.date() == now.date() else send_warning(body)
 
 
 def check_assignment_reminders(cfg):
@@ -289,7 +323,7 @@ def check_assignment_reminders(cfg):
         execute_query("UPDATE assignments SET reminder_sent_today = FALSE WHERE reminder_sent_today = TRUE")
         rows = fetch_all(
             "SELECT a.*, c.repo_name, c.repo_path_prefix, c.ical_course_code, c.canvas_course_name FROM assignments a JOIN courses c ON c.id = a.course_id "
-            "WHERE a.status IN ('pending','open') AND a.reminder_sent_today = FALSE AND a.due_at IS NOT NULL "
+            "WHERE a.status IN ('pending','open') AND a.is_event = FALSE AND a.reminder_sent_today = FALSE AND a.due_at IS NOT NULL "
             "AND a.due_at >= %s AND a.due_at <= %s AND c.active = TRUE AND c.monitor = TRUE AND c.telegram_enabled = TRUE ORDER BY a.due_at",
             (now - timedelta(days=1), now + timedelta(days=days)))
         for a in rows:

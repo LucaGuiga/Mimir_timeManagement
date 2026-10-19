@@ -156,7 +156,7 @@ def context(today):
     courses = fetch_all("SELECT id, ical_course_code, canvas_course_name FROM courses WHERE active = TRUE AND monitor = TRUE ORDER BY id")
     assignments = fetch_all(
         "SELECT a.id, a.course_id, a.title, a.assignment_type, a.due_at, a.status, a.canvas_assignment_id, c.ical_course_code FROM assignments a "
-        "JOIN courses c ON c.id = a.course_id WHERE c.active = TRUE AND a.due_at BETWEEN %s AND %s ORDER BY a.due_at",
+        "JOIN courses c ON c.id = a.course_id WHERE c.active = TRUE AND a.is_event = FALSE AND a.due_at BETWEEN %s AND %s ORDER BY a.due_at",
         (today - timedelta(days=14), today + timedelta(days=90)))
     events = fetch_all("SELECT id, date, start_time, end_time, label, time_category FROM schedule_blocks "
                        "WHERE date BETWEEN %s AND %s AND (source IS NULL OR source = 'telegram') ORDER BY date, start_time",
