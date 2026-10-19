@@ -48,8 +48,9 @@ export default function StressMeter() {
           <div className={`ratio band-${s.band || bandOf(s.ratio)}`}>{s.ratio.toFixed(2)} <small>{s.band || bandOf(s.ratio)}</small></div>
           <table className="kv">
             <tbody>
-              <tr><th>Available</th><td>{s.t_available?.toFixed(1)} h of {s.t_awake?.toFixed(1)} awake</td></tr>
-              <tr><th>Deadline term</th><td>{s.deadline_term?.toFixed(2)}</td></tr>
+              <tr><th>Free hours</th><td>{s.t_available?.toFixed(1)} h {s.equation === 'daily' ? 'today' : '(next 7 days)'}</td></tr>
+              <tr><th>{s.equation === 'daily' ? 'Work rate' : 'Study needed'}</th><td>{s.deadline_term?.toFixed(1)} {s.equation === 'daily' ? 'h/day' : 'h'}</td></tr>
+              {s.alt_ratio != null && <tr><th>Other equation ({s.equation === 'daily' ? 'plan' : 'daily'})</th><td>{s.alt_ratio.toFixed(2)} {s.alt_band || bandOf(s.alt_ratio)}</td></tr>}
               <tr><th>Sleep penalty</th><td>{s.sleep_penalty?.toFixed(2)} ({s.hours_slept?.toFixed(1)} h slept)</td></tr>
               <tr><th>Calculated</th><td>{fmtTime(s.calculated_at)}</td></tr>
             </tbody>

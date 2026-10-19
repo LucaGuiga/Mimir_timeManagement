@@ -7,8 +7,11 @@
     {% if s %}
     <div class="stress band-{{ s.band }}"><span class="ratio">{{ '%.2f'|format(s.ratio) }}</span> <span class="band">{{ s.band }}</span></div>
     <table class="kv">
-      <tr><th>T_available</th><td>{{ '%.2f'|format(s.t_available or 0) }} h</td></tr>
-      <tr><th>Deadline term</th><td>{{ '%.2f'|format(s.deadline_term or 0) }}</td></tr>
+      {% set week = s.equation == 'plan' %}
+      <tr><th>Equation</th><td>{{ 'plan: study needed / free hours, next 7 days' if week else 'daily: work rate / free hours today' }}</td></tr>
+      <tr><th>{{ 'Free hours (next 7 days)' if week else 'Free hours today' }}</th><td>{{ '%.1f'|format(s.t_available or 0) }} h</td></tr>
+      <tr><th>{{ 'Study hours needed' if week else 'Work rate (deadline term)' }}</th><td>{{ '%.1f'|format(s.deadline_term or 0) }} {{ 'h' if week else 'h/day' }}</td></tr>
+      {% if s.alt_ratio is not none %}<tr><th>Other equation ({{ s.alt_equation }})</th><td><span class="pill band-{{ s.alt_band }}">{{ '%.2f'|format(s.alt_ratio) }} {{ s.alt_band }}</span></td></tr>{% endif %}
       <tr><th>Sleep penalty</th><td>{{ '%.2f'|format(s.sleep_penalty or 0) }}</td></tr>
       <tr><th>Hours slept</th><td>{{ '%.1f'|format(s.hours_slept or 0) }}</td></tr>
       <tr><th>Calculated</th><td>{{ s.calculated_at|dt }}</td></tr>
@@ -23,8 +26,8 @@
   <div class="card">
     <h2>Polling (last hour)</h2>
     <table>
-      <tr><th>API</th><th>Last poll</th><th>Avg response</th></tr>
-      {% for m in metrics %}<tr><td>{{ m.api }}</td><td>{{ m.last|dt if m.last else 'none' }}</td><td>{{ m.avg_us ~ ' µs' if m.avg_us is not none else '–' }}</td></tr>{% endfor %}
+      <tr><th>API</th><th>Last poll</th><th>Polls</th><th>Avg response</th></tr>
+      {% for m in metrics %}<tr><td>{{ m.api }}</td><td>{{ m.last|dt if m.last else 'none' }}</td><td>{{ ('every %g min'|format(m.every)) if m.every is not none else 'not polling' }}</td><td>{% if m.avg_us is none %}–{% elif m.avg_us >= 1000000 %}{{ '%.1f s'|format(m.avg_us / 1000000) }}{% else %}{{ (m.avg_us / 1000)|round|int }} ms{% endif %}</td></tr>{% endfor %}
     </table>
   </div>
 </section>

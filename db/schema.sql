@@ -182,6 +182,9 @@ CREATE TABLE IF NOT EXISTS stress_scores (
   sleep_penalty FLOAT NULL,
   hours_slept FLOAT NULL,
   calculated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  -- run 13: ratio is the primary equation (stress.equation: plan or daily), alt_ratio the other one
+  equation VARCHAR(8) NULL,
+  alt_ratio FLOAT NULL,
   KEY ix_stress_date_calc (date, calculated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

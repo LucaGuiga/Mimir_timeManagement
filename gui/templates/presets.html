@@ -58,6 +58,11 @@
     a larger curve flattens it. The other sliders set when the stress ratio turns amber and red and its safety floors.</p>
   <form method="post" action="{{ url_for('presets_save') }}">
     <input type="hidden" name="form" value="stress">
+    <p class="inline">
+      <label><input type="radio" name="equation" value="plan"{{ ' checked' if stress_cfg.get('equation', 'plan') == 'plan' }}> Plan: study hours needed / free hours, next 7 days (primary)</label>
+      <label><input type="radio" name="equation" value="daily"{{ ' checked' if stress_cfg.get('equation') == 'daily' }}> Daily: work rate / free hours today</label>
+    </p>
+    <p class="muted">Both are calculated every time; the one not chosen is shown next to it for comparison.</p>
     <div class="slider-row">
       <span>Difficulty curve</span>
       <input type="range" id="curve" name="difficulty_curve" min="0.8" max="4" step="0.01" value="{{ curve }}" class="plain">

@@ -117,7 +117,11 @@ def create_app(cfg=None):
             a["days_remaining"] = round((a["due_at"] - now).total_seconds() / 86400, 1)
         avg = {r["api_name"]: r for r in fetch_all("SELECT api_name, AVG(response_time_us) AS avg_us, MAX(timestamp) AS last FROM poll_metrics "
                                                     "WHERE timestamp >= %s GROUP BY api_name", (now - timedelta(hours=1),))}
-        metrics = [{"api": a, "avg_us": None if a not in avg else int(avg[a]["avg_us"]), "last": avg.get(a, {}).get("last")} for a in ("ical", "github", "oura")]
+        oura_times = get(cfg_now(), "oura.poll_times", []) or []
+        every = {"ical": float(get(cfg_now(), "ical.poll_minutes", 10)), "github": float(get(cfg_now(), "github.poll_seconds", 60)) / 60,
+                 "oura": 24 * 60 / len(oura_times) if oura_times else None}   # minutes between polls
+        metrics = [{"api": a, "avg_us": None if a not in avg else int(avg[a]["avg_us"]), "last": avg.get(a, {}).get("last"),
+                    "every": every[a]} for a in ("ical", "github", "oura")]
         return render_template("index.html", s=s, blocks=blocks, due=due, metrics=metrics)
 
     # -------------------------------------------------------------- courses
@@ -377,6 +381,8 @@ def create_app(cfg=None):
         elif f.get("form") in ("stress", "study"):
             section = f.get("form")
             update[section] = {k: _clamp(f.get(k), lo, hi, kind) for k, (lo, hi, kind) in TUNABLE[section].items() if f.get(k) is not None}
+            if section == "stress" and f.get("equation") in ("plan", "daily"):
+                update["stress"]["equation"] = f["equation"]
             if section == "stress" and "hour_scale_default_pct" in f:
                 update["stress"]["hour_scale_default"] = max(1, min(100, int(float(f["hour_scale_default_pct"])))) / 100
         else:

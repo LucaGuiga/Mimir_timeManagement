@@ -80,6 +80,125 @@ def load_session(playwright, cookie_path=None):
         raise
 
 
+AUTO_LOGIN_TIMEOUT_S = 150          # time to finish the sign in, including a Duo push approved on the phone
+AUTO_LOGIN_RETRY_MIN = 30           # at most one automatic attempt per this many minutes
+DUO_HOST = "duosecurity.com"
+
+
+def _creds(cfg):
+    c = get(cfg, "canvas", {}) or {}
+    u, pw = str(c.get("username") or "").strip(), str(c.get("password") or "")
+    return (u, pw) if u and pw else None
+
+
+def _creds_key(creds):
+    """Fingerprint of the credentials, so a rejected sign in is not retried until they change. Not the password."""
+    return hashlib.sha256(f"{creds[0]}\0{creds[1]}".encode()).hexdigest()[:16]
+
+
+def _write_cookies(path, cookies):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(cookies, f)
+    os.replace(tmp, path)
+
+
+def _login_error_text(page):
+    for sel in (".form-error", ".alert-danger", "#error", ".output--error", "[role=alert]"):
+        loc = page.locator(sel)
+        if loc.count() and loc.first.inner_text().strip():
+            return loc.first.inner_text().strip()[:200]
+    return None
+
+
+def _click_text(page, label):
+    """Clicks the first visible button or link whose text contains label (Duo's buttons are matched by their text)."""
+    loc = page.locator(f"button:has-text('{label}'), a:has-text('{label}'), [role=button]:has-text('{label}')")
+    for i in range(loc.count()):
+        if loc.nth(i).is_visible():
+            loc.nth(i).click()
+            return True
+    return False
+
+
+def auto_login(playwright, cfg, cookie_path=None):
+    """Signs in to Canvas with canvas.username / canvas.password, the way a person would: the CruzID form on
+    login.ucsc.edu, then Duo. Duo's saved "remember this browser" cookies are loaded first, so most days no push is
+    needed; when Duo does push, Telegram says so at once. Returns "ok", "bad_credentials", "timeout" or "no_credentials".
+    The password is only typed into login.ucsc.edu and is never logged."""
+    creds = _creds(cfg)
+    if not creds:
+        return "no_credentials"
+    path = cookie_path or cookie_file(cfg)
+    browser = _launch(playwright, headless=True)
+    try:
+        ua = browser.new_page().evaluate("navigator.userAgent").replace("HeadlessChrome", "Chrome")   # look like the browser Duo remembers
+        context = browser.new_context(user_agent=ua)
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                context.add_cookies([c for c in json.load(f) if DUO_HOST in c.get("domain", "")])   # keep Duo's trust, not the dead session
+        page = context.new_page()
+        page.set_default_timeout(NAV_TIMEOUT_MS)
+        page.goto(BASE_URL + "/login", wait_until="domcontentloaded")
+        if "login.ucsc.edu" in urlsplit(page.url).netloc and page.locator("#password").count():
+            page.fill("#username_display", creds[0])
+            page.evaluate("u => { const h = document.querySelector('#username'); if (h) h.value = u; }", creds[0])
+            page.fill("#password", creds[1])
+            page.click("button[name=_eventId_proceed]")
+        told, deadline = False, time.monotonic() + AUTO_LOGIN_TIMEOUT_S
+        while time.monotonic() < deadline:
+            page.wait_for_timeout(1500)
+            host = urlsplit(page.url).netloc
+            if host == urlsplit(BASE_URL).netloc and not _looks_like_login(page):
+                _write_cookies(path, context.cookies())
+                return "ok"
+            if "login.ucsc.edu" in host and page.locator("#password").count():
+                err = _login_error_text(page)
+                if err:
+                    log_error(SCRIPT, "AutoLoginRejected", "auto_login", f"UCSC rejected the sign in: {err}")
+                    return "bad_credentials"
+            if DUO_HOST in host:
+                # "Duo Desktop needs permission to access your local network": nothing to grant on a server
+                for label in ("Skip for now", "Yes, this is my device", "Trust browser"):
+                    _click_text(page, label)
+                if not told and page.get_by_text(re.compile(r"(push|check for a duo|sent to)", re.I)).count():
+                    notifier.deliver("Canvas sign in: approve the Duo push on your phone now (Mimir is logging back in to Canvas).")
+                    told = True
+                if not told:
+                    for label in ("Send Me a Push", "Send a Push", "Duo Push"):
+                        if _click_text(page, label):
+                            break
+        log_error(SCRIPT, "AutoLoginTimeout", "auto_login", f"no Canvas dashboard after {AUTO_LOGIN_TIMEOUT_S}s (stopped at {urlsplit(page.url).netloc})")
+        return "timeout"
+    finally:
+        browser.close()
+
+
+def recover_session(playwright, cfg, path):
+    """After Canvas says the session ended: one automatic sign in at most every AUTO_LOGIN_RETRY_MIN minutes, never again
+    with credentials UCSC rejected, and one instant Telegram message per outage when a person has to step in."""
+    creds = _creds(cfg)
+    if creds and notifier._state_get("canvas_bad_credentials") != _creds_key(creds):
+        last = notifier._state_get("canvas_login_attempt_at")
+        if not last or (datetime.now() - datetime.fromisoformat(last)).total_seconds() >= AUTO_LOGIN_RETRY_MIN * 60:
+            notifier._state_set("canvas_login_attempt_at", datetime.now().isoformat(timespec="seconds"))
+            result = auto_login(playwright, cfg, path)
+            if result == "ok":
+                notifier._state_set("canvas_login_notified", "")
+                return True
+            if result == "bad_credentials":
+                notifier._state_set("canvas_bad_credentials", _creds_key(creds))
+    if not notifier._state_get("canvas_login_notified"):
+        reason = ("UCSC rejected the saved CruzID sign in; fix canvas.username / canvas.password in config.yaml"
+                  if creds and notifier._state_get("canvas_bad_credentials") == _creds_key(creds)
+                  else "the automatic sign in did not finish" if creds else "no saved CruzID sign in")
+        notifier.deliver(f"Canvas login needed ({reason}). On the server, in the Mimir folder: venv/bin/python -m pollers.canvas_scraper --login")
+        notifier._state_set("canvas_login_notified", datetime.now().isoformat(timespec="seconds"))
+    return False
+
+
 def interactive_login(playwright, cookie_path=None):
     path = cookie_path or cookie_file()
     browser = _launch(playwright, headless=False)
@@ -96,9 +215,7 @@ def interactive_login(playwright, cookie_path=None):
         else:
             print(f"Timed out after {LOGIN_TIMEOUT_S}s without reaching the Canvas dashboard; cookies not saved.")
             return False
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(context.cookies(), f)
+        _write_cookies(path, context.cookies())   # owner only: these cookies are a logged in Canvas session
         print(f"Canvas session saved to {path}")
         return True
     finally:
@@ -522,10 +639,15 @@ def run_cycle(cfg):
     with sync_playwright() as p:
         try:
             browser, page = load_session(p, path)
-        except SessionExpiredError as e:
-            log_error(SCRIPT, "SessionExpired", "load_session", str(e))
-            notifier.send_session_expired()
-            return "auth_failed"
+        except SessionExpiredError:
+            # UCSC ends every Canvas session 24 hours after sign in; sign in again automatically when credentials are saved
+            if not recover_session(p, cfg, path):
+                return "auth_failed"
+            try:
+                browser, page = load_session(p, path)
+            except SessionExpiredError as e:
+                log_error(SCRIPT, "SessionExpired", "load_session after sign in", str(e))
+                return "auth_failed"
         except Exception as e:
             log_error(SCRIPT, type(e).__name__, "load_session", str(e))
             return None

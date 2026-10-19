@@ -157,3 +157,101 @@ class Curve(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlanStress(unittest.TestCase):
+    def test_needed_over_free_in_the_window(self):
+        from datetime import date, timedelta
+        from core import stress
+        day = date.today() + timedelta(days=30)   # a future day: the whole window is free time
+        cfg = {"study": {"horizon_days": 7, "day_start": "08:00", "latest_end": "22:00"},
+               "time_presets": {"sleep_target_hours": 8, "alpha": 2, "breakfast_minutes": 0, "lunch_minutes": 0, "dinner_minutes": 0,
+                                "chores_minutes": 0, "commute_minutes": 0},
+               "difficulty_presets": {"test": 5}, "stress": {"difficulty_curve": 1.248}}
+        due = datetime.combine(day, datetime.min.time()) + timedelta(days=14)
+        class_block = {"date": day, "time_category": "class", "start_time": timedelta(hours=10), "end_time": timedelta(hours=12),
+                       "skipped": False, "source": "class"}
+        def fetch_all(q, p=None):
+            if "FROM schedule_blocks WHERE date >=" in q:
+                return [class_block]
+            if "source = 'study'" in q:
+                return [{"assignment_id": 1, "h": 4 * 3600}]   # 4 hours already studied
+            if "FROM assignments a JOIN courses" in q:
+                return [{"id": 1, "course_id": 2, "assignment_type": "test", "due_at": due}]
+            return [{"id": 2, "ical_course_code": "ECE-221-01", "hour_scale": 1.0}] if "FROM courses" in q else []
+        with mock.patch.object(stress, "fetch_all", side_effect=fetch_all), mock.patch.object(stress, "fetch_one", return_value=None), \
+             mock.patch("core.workload.fetch_all", side_effect=fetch_all):
+            r = stress.calculate(day, cfg)
+        self.assertAlmostEqual(r["t_available"], 7 * 14 - 2)                       # 14 h a day, minus the 2 h class
+        self.assertAlmostEqual(r["deadline_term"], (workload.hours_for(5) - 4) * 7 / 14, places=4)   # half of what is left falls in the window
+        self.assertAlmostEqual(r["ratio"], r["deadline_term"] / r["t_available"])
+
+
+class CanvasSignIn(unittest.TestCase):
+    CFG = {"canvas": {"username": "someone", "password": "pw"}}
+
+    def run_recover(self, state, result="ok"):
+        from pollers import canvas_scraper as cs
+        sent = []
+        with mock.patch.object(cs.notifier, "_state_get", side_effect=lambda n, d=None: state.get(n, d)), \
+             mock.patch.object(cs.notifier, "_state_set", side_effect=lambda n, v: state.__setitem__(n, v)), \
+             mock.patch.object(cs.notifier, "deliver", side_effect=lambda t: sent.append(t)), \
+             mock.patch.object(cs, "auto_login", return_value=result) as login:
+            ok = cs.recover_session(None, self.CFG, "x")
+        return ok, login, sent
+
+    def test_signs_in_and_clears_the_notice(self):
+        state = {"canvas_login_notified": "earlier"}
+        ok, login, sent = self.run_recover(state)
+        self.assertTrue(ok)
+        login.assert_called_once()
+        self.assertEqual(state["canvas_login_notified"], "")
+        self.assertEqual(sent, [])
+
+    def test_rejected_password_is_never_retried_and_says_so_once(self):
+        state = {}
+        ok, login, sent = self.run_recover(state, "bad_credentials")
+        self.assertFalse(ok)
+        self.assertIn("rejected", sent[0])
+        state["canvas_login_attempt_at"] = "2000-01-01T00:00:00"   # long ago: the time limit would allow another try
+        ok, login, sent = self.run_recover(state, "ok")
+        self.assertFalse(ok)
+        login.assert_not_called()
+        self.assertEqual(sent, [])                                  # no second message for the same outage
+
+    def test_at_most_one_attempt_per_half_hour(self):
+        state = {"canvas_login_attempt_at": datetime.now().isoformat(timespec="seconds"), "canvas_login_notified": "x"}
+        ok, login, sent = self.run_recover(state)
+        self.assertFalse(ok)
+        login.assert_not_called()
+
+
+class BothEquations(unittest.TestCase):
+    def test_plan_is_primary_and_daily_rides_along(self):
+        from core import stress
+        with mock.patch.object(stress, "calculate_plan", return_value={"ratio": 1.25, "band": "red"}), \
+             mock.patch.object(stress, "calculate_daily", return_value={"ratio": 1.56, "band": "red"}):
+            r = stress.calculate(None, {"stress": {"amber_below": 1.0}})
+            self.assertEqual((r["ratio"], r["equation"], r["alt_equation"], r["alt_ratio"]), (1.25, "plan", "daily", 1.56))
+            r = stress.calculate(None, {"stress": {"equation": "daily"}})
+            self.assertEqual((r["ratio"], r["equation"], r["alt_ratio"]), (1.56, "daily", 1.25))
+
+    def test_daily_is_the_original_formula(self):
+        from datetime import date, timedelta
+        from core import stress
+        day = date.today() + timedelta(days=30)
+        due = datetime.combine(day, datetime.min.time()) + timedelta(days=12, hours=12)   # 12 days after noon of `day`
+        cfg = {"time_presets": {"sleep_target_hours": 8, "alpha": 2, "breakfast_minutes": 30, "lunch_minutes": 30, "dinner_minutes": 60,
+                                "chores_minutes": 30, "commute_minutes": 30}, "difficulty_presets": {"hw": 2}}
+        def fetch_all(q, p=None):
+            if "FROM assignments a JOIN courses" in q:
+                return [{"course_id": 2, "assignment_type": "hw", "due_at": due}]
+            if "FROM schedule_blocks WHERE date = %s" in q:
+                return [{"time_category": "class", "start_time": timedelta(hours=10), "end_time": timedelta(hours=12), "skipped": False}]
+            return [{"id": 2, "ical_course_code": "ECE-221-01", "hour_scale": 1.0}] if "FROM courses" in q else []
+        with mock.patch.object(stress, "fetch_all", side_effect=fetch_all), mock.patch.object(stress, "fetch_one", return_value=None), \
+             mock.patch("core.workload.fetch_all", side_effect=fetch_all):
+            r = stress.calculate_daily(day, cfg)
+        available = (24 - 8) - 2 - 0.5 - (0.5 + 2.0)          # awake - class - commute - (chores + meals)
+        self.assertAlmostEqual(r["t_available"], available)
+        self.assertAlmostEqual(r["ratio"], (workload.hours_for(2) / 12) / available)

@@ -58,8 +58,14 @@ def _send(cfg, subject, parts):
 
 def _stress_rows(d, cfg):
     s = stress.latest_for(d) or stress.calculate_and_store(d, cfg)
-    return [f"Ratio {s['ratio']:.2f} ({s['band']})", f"T_available {s['t_available']:.1f} h of {s['t_awake']:.1f} awake",
-            f"Deadline term {s['deadline_term']:.2f}", f"Sleep penalty {s['sleep_penalty']:.2f} ({s['hours_slept']:.1f} h slept)"]
+    week = s.get("equation", "plan") == "plan"
+    rows = [f"Ratio {s['ratio']:.2f} ({s['band']}, {s.get('equation', 'plan')} equation)",
+            f"Study needed {s['deadline_term']:.1f} h of {s['t_available']:.1f} h free (next 7 days)" if week
+            else f"Work rate {s['deadline_term']:.1f} h/day of {s['t_available']:.1f} h free today",
+            f"Sleep penalty {s['sleep_penalty']:.2f} ({s['hours_slept']:.1f} h slept)"]
+    if s.get("alt_ratio") is not None:
+        rows.append(f"Other equation ({s.get('alt_equation')}): {s['alt_ratio']:.2f} ({s.get('alt_band')})")
+    return rows
 
 
 def _code(row):

@@ -33,7 +33,8 @@ def build_snapshots(cfg=None):
     snap = {}
     s = stress.latest_for(today)
     snap["stress_today"] = None if not s else {k: s[k] for k in ("date", "ratio", "band", "t_available", "t_awake",
-                                                                  "deadline_term", "sleep_penalty", "hours_slept", "calculated_at")}
+                                                                  "deadline_term", "sleep_penalty", "hours_slept", "calculated_at",
+                                                                  "equation", "alt_ratio", "alt_band")}
     snap["stress_history"] = fetch_all(
         "SELECT s.date, s.ratio FROM stress_scores s JOIN (SELECT date, MAX(calculated_at) AS m FROM stress_scores "
         "WHERE date >= %s GROUP BY date) l ON l.date = s.date AND l.m = s.calculated_at ORDER BY s.date", (today - timedelta(days=90),))

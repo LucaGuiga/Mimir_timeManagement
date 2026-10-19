@@ -139,6 +139,9 @@ time_presets:
   alpha: 2.0
 
 stress:
+  # Which stress equation is primary (colour, emails, schedule decisions); the other is shown beside it.
+  # plan: study hours needed / free hours over the next study.horizon_days. daily: work rate / free hours today.
+  equation: "plan"
   # Hours per difficulty: e^(difficulty / difficulty_curve). 1.248 makes difficulty 5 about 55 hours; larger flattens it.
   # Tunable on the Presets page.
   difficulty_curve: 1.248
@@ -247,6 +250,12 @@ privacy:
     emails: []
     student_id: ""
     usernames: []
+
+canvas:
+  # CruzID sign in, so Mimir can log back in to Canvas by itself when UCSC ends the session (every 24 hours).
+  # Only ever typed into login.ucsc.edu, never logged. Leave password empty to keep logging in by hand.
+  username: ""
+  password: ""
 
 scraper:
   # Playwright scraper for Canvas web pages. Needs a logged in Canvas browser session, off by default.
