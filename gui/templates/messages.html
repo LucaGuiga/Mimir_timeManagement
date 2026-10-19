@@ -11,6 +11,18 @@
   </table>
 </div>
 <div class="card">
+  <h2>Requests</h2>
+  <p class="muted">Tell the bot about events, cancelled classes, new assignments, due date changes, finished work or notes. Mimir reads it,
+    DeepSeek checks it, and you get "can you verify this change?" plus a calendar preview. Nothing changes until you reply yes.</p>
+  <table>
+    <tr><th>#</th><th>Sent</th><th>Message</th><th>Status</th><th>Change</th></tr>
+    {% for r in requests %}<tr><td>{{ r.id }}</td><td>{{ r.created_at|dt }}</td><td style="white-space:pre-wrap">{{ r.text }}</td>
+      <td><span class="pill {{ {'applied': 'green', 'awaiting_confirm': 'amber', 'needs_info': 'amber', 'failed': 'red'}.get(r.status, '') }}">{{ r.status.replace('_', ' ') }}</span></td>
+      <td style="white-space:pre-wrap">{{ r.summary or r.result or '' }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">No requests yet.</td></tr>{% endfor %}
+  </table>
+</div>
+<div class="card">
   <h2>Waiting for the next digest</h2>
   <p class="muted">Telegram updates are pooled and sent as one summary {{ wait }} minutes after the first one, together with any errors logged meanwhile.</p>
   <table>

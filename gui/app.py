@@ -191,7 +191,8 @@ def create_app(cfg=None):
     def messages():
         rows = fetch_all("SELECT * FROM telegram_inbox ORDER BY received_at DESC, id DESC LIMIT 200")
         pending = fetch_all("SELECT created_at, level, text FROM notification_queue WHERE sent_at IS NULL ORDER BY id")
-        html = render_template("messages.html", rows=rows, pending=pending, wait=get(cfg_now(), "telegram.digest_minutes", 30))
+        requests_ = fetch_all("SELECT id, text, status, summary, result, created_at, decided_at FROM telegram_requests ORDER BY id DESC LIMIT 100")
+        html = render_template("messages.html", rows=rows, pending=pending, requests=requests_, wait=get(cfg_now(), "telegram.digest_minutes", 30))
         execute_query("UPDATE telegram_inbox SET seen = TRUE WHERE seen = FALSE")
         return html
 

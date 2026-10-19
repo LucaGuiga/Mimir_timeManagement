@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS assignments (
   reminder_24h_sent BOOLEAN NOT NULL DEFAULT FALSE,
   -- run 5: daily reminder dedup flag, reset every morning by notifier.check_assignment_reminders
   reminder_sent_today BOOLEAN NOT NULL DEFAULT FALSE,
+  -- run 14: a due date changed through Telegram wins over the iCal feed; source 'telegram' = added by you
+  manual_due BOOLEAN NOT NULL DEFAULT FALSE,
+  source VARCHAR(16) NULL,
   UNIQUE KEY uq_canvas_assignment_id (canvas_assignment_id),
   UNIQUE KEY uq_ical_uid (ical_uid),
   KEY ix_assignments_grade_detected (grade_detected_at),
@@ -428,7 +431,34 @@ CREATE TABLE IF NOT EXISTS telegram_inbox (
   received_at DATETIME NOT NULL,
   text TEXT NOT NULL,
   seen BOOLEAN NOT NULL DEFAULT FALSE,
+  processed BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE KEY uq_telegram_inbox_update (update_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- run 14: requests sent to the bot and class cancellations
+-- One request per message: parsed by Mimir and DeepSeek, then waiting for your yes or no.
+-- status: needs_info, awaiting_confirm, applied, rejected, failed, expired
+CREATE TABLE IF NOT EXISTS telegram_requests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  inbox_id INT NULL,
+  text TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  draft_json JSON NULL,
+  proposal_json JSON NULL,
+  summary TEXT NULL,
+  result TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  decided_at DATETIME NULL,
+  KEY ix_telegram_requests_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- "No class Thursday": the planner leaves that day's class blocks out.
+CREATE TABLE IF NOT EXISTS class_cancellations (
+  course_id INT NOT NULL,
+  date DATE NOT NULL,
+  reason VARCHAR(255) NULL,
+  PRIMARY KEY (course_id, date),
+  CONSTRAINT fk_class_cancellations_course FOREIGN KEY (course_id) REFERENCES courses (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS schema_migrations (

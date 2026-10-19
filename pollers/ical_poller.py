@@ -153,7 +153,7 @@ def _upsert_event(cfg, course, comp, now):
             (course["id"], canvas_id, title, atype, _number(title), due, status, posted_at(comp, now), url, uid, is_mid, is_fin))
     else:
         aid = row["id"]
-        if due != row["due_at"] and due is not None:
+        if due != row["due_at"] and due is not None and not row.get("manual_due"):   # a due date you set through Telegram wins
             execute_query("INSERT INTO assignment_changes (assignment_id, field_changed, old_value, new_value) VALUES (%s,'due_at',%s,%s)",
                           (aid, None if row["due_at"] is None else str(row["due_at"]), str(due)))
         if uid and row["ical_uid"] and title != row["title"]:
@@ -162,7 +162,7 @@ def _upsert_event(cfg, course, comp, now):
         computed = "pending" if due and due > now else "open"
         status = computed if STATUS_RANK[computed] > STATUS_RANK.get(row["status"], 0) else row["status"]
         execute_query(
-            "UPDATE assignments SET due_at = COALESCE(%s, due_at), title = %s, status = %s, canvas_assignment_url = COALESCE(canvas_assignment_url, %s), "
+            "UPDATE assignments SET due_at = CASE WHEN manual_due THEN due_at ELSE COALESCE(%s, due_at) END, title = %s, status = %s, canvas_assignment_url = COALESCE(canvas_assignment_url, %s), "
             "ical_uid = COALESCE(ical_uid, %s), is_midterm = is_midterm OR %s, is_final = is_final OR %s WHERE id = %s",
             (due, title if (uid and row["ical_uid"]) else row["title"], status, url, uid, is_mid, is_fin, aid))
     if is_mid:

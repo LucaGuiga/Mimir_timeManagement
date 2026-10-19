@@ -174,6 +174,8 @@ def plan(cfg=None, today=None, now=None):
     execute_query("DELETE FROM schedule_blocks WHERE source IN ('class','study') AND ((date = %s AND start_time >= %s) OR (date > %s AND date <= %s))",
                   (today, _hhmm(now_min), today, end))
     classes = class_blocks(_meetings(cfg, today), days)
+    cancelled = {(r["course_id"], r["date"]) for r in fetch_all("SELECT course_id, date FROM class_cancellations WHERE date >= %s AND date <= %s", (today, end))}
+    classes = {d: [b for b in v if (b["course_id"], d) not in cancelled] for d, v in classes.items()}   # "no class Thursday"
     kept = fetch_all("SELECT date, start_time, end_time FROM schedule_blocks WHERE date >= %s AND date <= %s AND skipped = FALSE", (today, end))
     busy = {d: [(b["start"], b["end"]) for b in classes[d]] for d in days}
     for b in kept:

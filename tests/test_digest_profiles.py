@@ -46,6 +46,7 @@ class Digest(unittest.TestCase):
              mock.patch("db.db.execute_query", side_effect=lambda q, p=None: updates.append((q, p))), \
              mock.patch("core.llm_parser.enabled", return_value=True), \
              mock.patch("core.llm_parser.json_call", side_effect=summary or (lambda *a, **k: ({"message": "Summary text"}, 0.0))), \
+             mock.patch.object(notifier, "flush_outbox"), \
              mock.patch.object(notifier, "deliver", return_value=True) as send:
             sent = notifier.flush_digest(CFG, now)
         return sent, send, updates, state
@@ -255,3 +256,55 @@ class BothEquations(unittest.TestCase):
         available = (24 - 8) - 2 - 0.5 - (0.5 + 2.0)          # awake - class - commute - (chores + meals)
         self.assertAlmostEqual(r["t_available"], available)
         self.assertAlmostEqual(r["ratio"], (workload.hours_for(2) / 12) / available)
+
+
+class DeadSpots(unittest.TestCase):
+    def test_dropped_connection_is_retried_then_sent(self):
+        import requests
+        calls = []
+        def post(text):
+            calls.append(text)
+            if len(calls) < 3:
+                raise requests.ConnectionError("Connection reset by peer")
+        with mock.patch.object(notifier, "_post_message", side_effect=post), mock.patch("time.sleep"), \
+             mock.patch.object(notifier, "write_fallback") as fb:
+            self.assertTrue(notifier.deliver("Hey, can you verify this change?"))
+        self.assertEqual(len(calls), 3)
+        fb.assert_not_called()
+
+    def test_still_down_goes_to_the_outbox_and_out_later(self):
+        import requests
+        q = []
+        with mock.patch.object(notifier, "_post_message", side_effect=requests.Timeout("read timeout")), mock.patch("time.sleep"), \
+             mock.patch.object(notifier, "write_fallback"), mock.patch("db.db.execute_query", side_effect=lambda s, p=None: q.append((s, p))):
+            self.assertFalse(notifier.deliver("Done, request #12 applied"))
+        self.assertEqual(q[0][1], ("outbox", "Done, request #12 applied"))
+        sent, marked = [], []
+        with mock.patch("db.db.fetch_all", return_value=[{"id": 4, "created_at": NOW, "text": "Done, request #12 applied"}]), \
+             mock.patch("db.db.execute_query", side_effect=lambda s, p=None: marked.append(p)), \
+             mock.patch.object(notifier, "deliver", side_effect=lambda t, outbox=True: sent.append((t, outbox)) or True):
+            notifier.flush_outbox()
+        self.assertEqual(sent, [("(delayed, from 12:00) Done, request #12 applied", False)])
+        self.assertEqual(marked, [(4,)])
+
+    def test_a_refused_message_is_not_retried(self):
+        with mock.patch.object(notifier, "_post_message", side_effect=RuntimeError("telegram http 400")) as post, \
+             mock.patch.object(notifier, "write_fallback"), mock.patch("db.db.execute_query") as q:
+            self.assertFalse(notifier.deliver("x"))
+        self.assertEqual(post.call_count, 1)
+        q.assert_not_called()
+
+    def test_short_gaps_are_quiet_and_long_ones_logged_once(self):
+        state = {}
+        with mock.patch.object(notifier, "_state_get", side_effect=lambda n, d=None: state.get(n, d)), \
+             mock.patch.object(notifier, "_state_set", side_effect=lambda n, v: state.__setitem__(n, v)), \
+             mock.patch("logs.error_handler.log_error") as log:
+            notifier.reachable(False, RuntimeError("reset"))
+            notifier.reachable(False, RuntimeError("reset"))
+            log.assert_not_called()                                    # a few minutes down: nothing logged
+            state["telegram_unreachable_since"] = (datetime.now() - timedelta(minutes=31)).isoformat(timespec="seconds")
+            notifier.reachable(False, RuntimeError("reset"))
+            notifier.reachable(False, RuntimeError("reset"))
+            self.assertEqual(log.call_count, 1)                        # 30 minutes down: one entry for the outage
+            notifier.reachable(True)
+        self.assertEqual(state["telegram_unreachable_since"], "")

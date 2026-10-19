@@ -9,7 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from core import aws_push, dashboard_passwords, email_sender, notifier, planner, professor_profiler, progress, repo_manager, schedule_builder, stress
+from core import aws_push, dashboard_passwords, email_sender, intake, notifier, planner, professor_profiler, progress, repo_manager, schedule_builder, stress
 from core.config import ConfigError, get, load_config, repo_root, validate_config
 from core.supervisor import Supervisor
 from db.db import DBError, execute_query, fetch_all, fetch_one
@@ -109,7 +109,14 @@ def run():
     sched.add_job(_safe("assignment reminders", lambda: notifier.check_assignment_reminders(cfg)), CronTrigger(hour=8, minute=0), id="assignment_reminders")
     # Telegram: one pooled digest per telegram.digest_minutes, and replies sent to the bot saved for the GUI Messages page
     sched.add_job(_safe("telegram digest", notifier.flush_digest), IntervalTrigger(seconds=60), id="telegram_digest")
-    sched.add_job(_safe("telegram replies", notifier.poll_replies), IntervalTrigger(seconds=int(get(cfg, "telegram.reply_poll_seconds", 60))), id="telegram_replies")
+    def _replies():
+        try:
+            notifier.poll_replies()   # save what you sent the bot,
+            notifier.reachable(True)
+        except Exception as e:        # brief Wi-Fi dead spots are normal; only a long outage is worth an error
+            notifier.reachable(False, e)
+        intake.process()              # then read new requests and yes / no answers
+    sched.add_job(_safe("telegram replies", _replies), IntervalTrigger(seconds=int(get(cfg, "telegram.reply_poll_seconds", 60))), id="telegram_replies")
 
     def _handle(signum, frame):
         _stop.set()

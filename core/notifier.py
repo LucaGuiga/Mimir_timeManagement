@@ -47,29 +47,59 @@ def send_message(text, level="info"):
     return deliver(text)
 
 
-def deliver(text):
-    """Sends one Telegram message now."""
+RETRY_DELAYS_S = (2, 6)   # outgoing messages are tried 3 times over about 10 seconds before going to the outbox
+OUTBOX = "outbox"          # notification_queue level for instant messages that could not be sent yet
+
+
+def _post_message(text):
+    cfg = load_config()
+    token, chat_id = get(cfg, "telegram.bot_token"), get(cfg, "telegram.chat_id")
+    if not token or not chat_id:
+        raise ValueError("telegram.bot_token or telegram.chat_id not configured")
+    r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                      json={"chat_id": str(chat_id), "text": text, "disable_web_page_preview": True}, timeout=TIMEOUT)
+    if r.status_code != 200 or not r.json().get("ok"):
+        raise RuntimeError(f"telegram http {r.status_code}: {r.text[:200]}")
+
+
+def deliver(text, outbox=True):
+    """Sends one Telegram message now. Network failures (the Wi-Fi dead spots) are retried; if all tries fail the message
+    waits in the outbox and flush_digest sends it the next minute marked "(delayed)", so it is not lost. Returns True
+    when sent. outbox=False is for the digest itself, which simply stays queued and is tried again."""
     text = str(text)
     if len(text) > MAX_LEN:
         text = text[:MAX_LEN - 3] + "..."
-    try:
-        cfg = load_config()
-        token, chat_id = get(cfg, "telegram.bot_token"), get(cfg, "telegram.chat_id")
-        if not token or not chat_id:
-            raise ValueError("telegram.bot_token or telegram.chat_id not configured")
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": str(chat_id), "text": text, "disable_web_page_preview": True},
-            timeout=TIMEOUT,
-        )
-        if r.status_code != 200 or not r.json().get("ok"):
-            raise RuntimeError(f"telegram http {r.status_code}: {r.text[:200]}")
-        return True
-    except Exception as e:
-        write_fallback({"script_name": "notifier", "error_type": type(e).__name__,
-                        "operation": "send_message", "raw_message": str(e),
-                        "severity": "warning", "unsent_text": text[:500]})
-        return False
+    import time as _time
+    err = None
+    for attempt in range(len(RETRY_DELAYS_S) + 1):
+        try:
+            _post_message(text)
+            return True
+        except (requests.ConnectionError, requests.Timeout) as e:   # a dropped connection: worth another try
+            err = e
+            if attempt < len(RETRY_DELAYS_S):
+                _time.sleep(RETRY_DELAYS_S[attempt])
+        except Exception as e:                                      # bad token, message refused: retrying will not help
+            err = e
+            break
+    write_fallback({"script_name": "notifier", "error_type": type(err).__name__, "operation": "send_message",
+                    "raw_message": str(err), "severity": "warning", "unsent_text": text[:500]})
+    if outbox and isinstance(err, (requests.ConnectionError, requests.Timeout)):
+        try:
+            from db.db import execute_query
+            execute_query("INSERT INTO notification_queue (level, text) VALUES (%s, %s)", (OUTBOX, text[:MAX_LEN]))
+        except Exception:
+            pass
+    return False
+
+
+def flush_outbox():
+    """Sends instant messages that could not go out earlier, oldest first, one try each per run."""
+    from db.db import execute_query, fetch_all
+    for q in fetch_all("SELECT id, created_at, text FROM notification_queue WHERE sent_at IS NULL AND level = %s ORDER BY id", (OUTBOX,)):
+        if not deliver(f"(delayed, from {q['created_at']:%H:%M}) {q['text']}", outbox=False):
+            return
+        execute_query("UPDATE notification_queue SET sent_at = NOW() WHERE id = %s", (q["id"],))
 
 
 def send_warning(text):
@@ -123,7 +153,7 @@ def build_digest(cfg, queued, errors):
         from core import llm_parser
         if items and llm_parser.enabled(cfg):
             body = "\n".join(items[:DIGEST_MAX_ITEMS]) + (f"\n...and {extra} more" if extra > 0 else "")
-            data, _ = llm_parser.json_call(cfg, "telegram_digest", DIGEST_PROMPT, body, max_tokens=4000)
+            data, _ = llm_parser.json_call(cfg, "telegram_digest", DIGEST_PROMPT, body, max_tokens=16000)   # room for deepseek-flash thinking
             if isinstance(data, dict) and isinstance(data.get("message"), str) and data["message"].strip():
                 return data["message"].strip()
     except Exception as e:   # never log_error here: that would feed the next digest
@@ -142,14 +172,15 @@ def flush_digest(cfg=None, now=None):
         top = fetch_one("SELECT COALESCE(MAX(id), 0) AS m FROM error_log")["m"]
         _state_set("digest_last_error_id", top)
         last = top
-    queued = fetch_all("SELECT id, created_at, level, text FROM notification_queue WHERE sent_at IS NULL ORDER BY id")
+    flush_outbox()
+    queued = fetch_all("SELECT id, created_at, level, text FROM notification_queue WHERE sent_at IS NULL AND level <> %s ORDER BY id", (OUTBOX,))
     errors = fetch_all("SELECT id, timestamp, script_name, error_type, operation, severity, raw_message FROM error_log WHERE id > %s ORDER BY id",
                        (int(last),))
     stamps = [q["created_at"] for q in queued] + [e["timestamp"] for e in errors]
     if not stamps or (now - min(stamps)).total_seconds() < wait * 60:
         return False
     head = f"Mimir, {min(stamps):%H:%M} to {now:%H:%M}: {len(queued)} update{'s' * (len(queued) != 1)}, {len(errors)} error{'s' * (len(errors) != 1)}\n\n"
-    if not deliver(head + build_digest(cfg, queued, errors)):
+    if not deliver(head + build_digest(cfg, queued, errors), outbox=False):
         return False   # kept waiting; the next run tries again
     if queued:
         ph = ",".join(["%s"] * len(queued))
@@ -269,3 +300,26 @@ def check_assignment_reminders(cfg):
         write_fallback({"script_name": "notifier", "error_type": type(e).__name__, "operation": "check_assignment_reminders",
                         "raw_message": str(e), "severity": "warning"})
     return sent
+
+
+UNREACHABLE_LOG_MIN = 30
+
+
+def reachable(ok, err=None):
+    """Tracks whether Telegram answers the reply check. A failure is logged only once Telegram has been unreachable
+    for UNREACHABLE_LOG_MIN minutes (one entry per outage), so short network gaps stay out of the digest."""
+    from logs.error_handler import log_error
+    since = _state_get("telegram_unreachable_since")
+    if ok:
+        if since:
+            _state_set("telegram_unreachable_since", "")
+        return
+    now = datetime.now()
+    if not since:
+        _state_set("telegram_unreachable_since", now.isoformat(timespec="seconds"))
+        return
+    started = datetime.fromisoformat(since)
+    if (now - started).total_seconds() >= UNREACHABLE_LOG_MIN * 60 and _state_get("telegram_unreachable_logged") != since:
+        log_error("notifier", type(err).__name__ if err else "Unreachable", "telegram replies",
+                  f"Telegram unreachable since {started:%H:%M}: {err}")
+        _state_set("telegram_unreachable_logged", since)
